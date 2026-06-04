@@ -14,7 +14,7 @@ import logging
 import os
 import time
 from dotenv import load_dotenv
-
+from analytics import router as analytics_router
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,10 +27,10 @@ import json
 
 import httpx
 import PyPDF2
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-
+from firebase_auth import FirebaseAuthMiddleware, init_firebase
 from memory import (
     add_turn_and_get_prompt,
     active_session_count,
@@ -94,6 +94,8 @@ async def lifespan(app: FastAPI):
     # 1. DB — fast, must complete before serving
     await asyncio.to_thread(init_db)
     logger.info("Database initialised.")
+    init_firebase()                        # ← ADD THIS LINE
+    logger.info("Firebase initialised.")
 
     # 2. Session pruner
     pruner = asyncio.create_task(prune_stale_sessions())
@@ -122,6 +124,7 @@ async def lifespan(app: FastAPI):
 
 # ── app ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Gemma4 Chat Service", version="3.0.0", lifespan=lifespan)
+
 UPLOAD_FOLDER = "uploads"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -138,7 +141,7 @@ async def upload_file(file: UploadFile = File(...)):
         "filename": file.filename,
         "path": file_path
     }
-
+app.include_router(analytics_router)
 origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 if not origins:
     origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -153,6 +156,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(FirebaseAuthMiddleware) 
 
 
 # ── request / response models ─────────────────────────────────────────────────
@@ -398,7 +402,16 @@ def _persist_query(
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
+async def chat(req: ChatRequest, background_tasks: BackgroundTasks, request: Request):
+    # Access authenticated user anywhere in the route:
+    current_user = request.state.user
+    uid   = current_user["uid"]      # Firebase UID
+    email = current_user["email"]    # user@example.com
+    name  = current_user["name"]     # Display name
+ 
+    # You can now override req.user_id with the verified Firebase UID
+    # so users can't spoof each other's analytics:
+    req.user_id = uid                # ← makes user_id tamper-proof
     """
     Memory-aware text chat.
 
