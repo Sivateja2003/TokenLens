@@ -8,6 +8,16 @@ class Base(DeclarativeBase):
     pass
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id    = Column(Integer, primary_key=True, index=True)
+    name  = Column(String(128), nullable=False)
+    email = Column(String(128), unique=True, index=True, nullable=False)
+    role  = Column(String(32), default="developer")  # e.g., 'admin', 'developer'
+
+
+
 class UserProfile(Base):
     """
     Anonymous user identity anchored to a browser localStorage UUID.

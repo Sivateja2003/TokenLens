@@ -27,9 +27,11 @@ import json
 
 import httpx
 import PyPDF2
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+from datetime import datetime
 
 from memory import (
     add_turn_and_get_prompt,
@@ -40,7 +42,8 @@ from memory import (
     summarize_in_background,
 )
 from memory.store import delete as delete_session
-from database import init_db, upsert_user, upsert_session, log_query, save_pdf_chunks, load_pdf_chunks, SessionLocal
+from database import init_db, upsert_user, upsert_session, log_query, save_pdf_chunks, load_pdf_chunks, SessionLocal, get_db, User
+from auth import LoginPayload, get_current_user, create_jwt, decode_jwt_payload_unverified
 
 
 # ── env ───────────────────────────────────────────────────────────────────────
@@ -358,6 +361,7 @@ def _persist_query(
     has_attachment:  bool,
     attachment_type: str | None,
     pdf_chunks:      list[str] | None = None,
+    user_name:       str | None = None,
 ) -> None:
     """
     Sync DB writer — FastAPI runs sync background tasks in a thread pool,
@@ -369,7 +373,23 @@ def _persist_query(
     """
     db = SessionLocal()
     try:
-        upsert_user(db, user_id)
+        from database.models import UserProfile
+        user = db.get(UserProfile, user_id)
+        now = datetime.utcnow()
+        if user is None:
+            user = UserProfile(
+                user_id      = user_id,
+                display_name = user_name or f"User-{user_id[-6:].upper()}",
+                created_at   = now,
+                last_seen    = now,
+            )
+            db.add(user)
+        else:
+            if user_name and user.display_name != user_name:
+                user.display_name = user_name
+            user.last_seen = now
+        db.commit()
+
         upsert_session(db, session_id, user_id)
         if pdf_chunks:
             save_pdf_chunks(db, session_id, pdf_chunks)
@@ -398,7 +418,11 @@ def _persist_query(
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
+async def chat(
+    req: ChatRequest,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+):
     """
     Memory-aware text chat.
 
@@ -506,6 +530,8 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         prompt_tokens, completion_tokens, tokens_attach,
         latency_ms, cost["usd"], cost["inr"],
         req.message[:500], bool(pdf_context), "pdf" if pdf_context else None,
+        None,
+        current_user.name,
     )
 
     return ChatResponse(
@@ -530,6 +556,7 @@ async def chat_file(
     message:    str        = Form(""),
     model:      str        = Form("gemma"),
     file:       UploadFile = File(...),
+    current_user: User     = Depends(get_current_user),
 ):
     """
     Memory-aware multimodal chat (image or PDF).
@@ -686,6 +713,7 @@ async def chat_file(
         latency_ms, cost["usd"], cost["inr"],
         message[:500], True, attachment_type,
         _session_pdfs.get(session_id),   # saved to DB after upsert_session
+        current_user.name,
     )
 
     return ChatResponse(
@@ -751,22 +779,64 @@ def count_tokens(text: str, model_type: str = "gemma"):
 def root():
     return {"service": "Gemma4 Chat Service", "version": "3.0.0", "docs": "/docs"}
 
-@app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+@app.post("/api/auth/login")
+def login_with_firebase(payload: LoginPayload, db: Session = Depends(get_db)):
+    """
+    Receives a Firebase ID Token (or bypass mock token).
+    Looks up the user by email. Creates user if not exists.
+    Returns local JWT.
+    """
+    token = payload.id_token
     
-    upload_folder = "uploads"
-    os.makedirs(upload_folder, exist_ok=True)
-
-    file_path = os.path.join(upload_folder, file.filename)
-
-    with open(file_path, "wb") as buffer:
-        buffer.write(await file.read())
-
-    return {
-        "message": "File uploaded successfully",
-        "filename": file.filename,
-        "path": file_path
+    try:
+        claims = decode_jwt_payload_unverified(token)
+        email = claims.get("email")
+        name = claims.get("name") or email.split("@")[0].title()
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid ID Token payload: {str(e)}"
+        )
+            
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="ID token does not contain a valid email address."
+        )
+        
+    user = db.query(User).filter(User.email == email).first()
+    
+    if not user:
+        user = User(
+            name=name,
+            email=email,
+            role="admin"
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        
+    import time
+    jwt_payload = {
+        "sub": user.id,
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+        "exp": int(time.time()) + 24 * 3600
     }
+    local_jwt = create_jwt(jwt_payload)
+    
+    return {
+        "token": local_jwt,
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role
+        }
+    }
+
+
 # ── entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn

@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
-from .models import Base, UserProfile, ChatSession, QueryAnalytic
+from .models import Base, User, UserProfile, ChatSession, QueryAnalytic
 
 logger = logging.getLogger(__name__)
 
@@ -172,3 +172,11 @@ def log_query(
     db.add(record)
     db.commit()
     return record
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

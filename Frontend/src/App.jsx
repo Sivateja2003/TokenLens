@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon } from 'lucide-react';
+import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon, LogOut } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import MetricsView from './MetricsView';
+import { AuthProvider, useAuth } from './hooks/useAuth';
+import ProtectedRoute from './components/ProtectedRoute';
 import alumnxLogo from './assets/alumnxlogo_new.png';
 import './index.css';
 
@@ -12,7 +14,8 @@ const MODEL_PRICING = {
   gpt4:  { input: 1.10 / 1_000_000, output: 4.40  / 1_000_000, label: 'GPT-5 Nano' },
 };
 
-function App() {
+function AppContent() {
+  const { token, user, logout } = useAuth();
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
   const [conversations, setConversations] = useState(() => {
@@ -230,6 +233,9 @@ function App() {
         data = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', `${API_BASE_URL}/chat-file`);
+          if (token) {
+            xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+          }
           xhr.upload.onprogress = (ev) => {
             if (ev.lengthComputable) setUploadProgress(Math.round((ev.loaded / ev.total) * 100));
           };
@@ -247,7 +253,10 @@ function App() {
       } else {
         const response = await fetch(`${API_BASE_URL}/chat`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
           body: JSON.stringify({ message: trimmed, session_id: sesssionId, user_id: userId, model: selectedModel }),
         });
         if (!response.ok) throw new Error('Failed to connect to Gemma E4B');
@@ -418,12 +427,42 @@ function App() {
           )}
         </div>
 
-        <div className="sidebar-footer">
-          <div className="user-profile">
-            <div className="avatar">U</div>
-            <span>Guest User</span>
+        <div className="sidebar-footer" style={{ paddingTop: '0.75rem', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+          <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', flex: 1 }}>
+            <div className="avatar" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent-secondary))', color: 'white', fontWeight: 600, flexShrink: 0 }}>
+              {(() => {
+                if (!user?.name) return "U";
+                return user.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+              })()}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1 }}>
+              <span style={{ fontSize: '0.84rem', fontWeight: 500, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={user?.name || 'User'}>
+                {user?.name || "User"}
+              </span>
+              <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={user?.email || ''}>
+                {user?.email || ""}
+              </span>
+            </div>
           </div>
-          <div className="settings-icons">
+          <div className="settings-icons" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+            <button 
+              onClick={logout} 
+              title="Log Out" 
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--text-dim)",
+                cursor: "pointer",
+                padding: "4px",
+                display: "flex",
+                alignItems: "center",
+                transition: "color 0.2s ease"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.color = "var(--danger)"}
+              onMouseLeave={(e) => e.currentTarget.style.color = "var(--text-dim)"}
+            >
+              <LogOut size={16} />
+            </button>
             <Settings size={18} />
           </div>
         </div>
@@ -648,4 +687,12 @@ function App() {
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <AuthProvider>
+      <ProtectedRoute>
+        <AppContent />
+      </ProtectedRoute>
+    </AuthProvider>
+  );
+}
