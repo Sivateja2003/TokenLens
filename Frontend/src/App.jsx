@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon, LogOut } from 'lucide-react';
+import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon, LogOut, ShieldCheck } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth } from './firebase';
+import AuthPage from './AuthPage';
 import MetricsView from './MetricsView';
-import { AuthProvider, useAuth } from './hooks/useAuth';
-import ProtectedRoute from './components/ProtectedRoute';
+import SettingsPage from './SettingsPage';
+import AdminPage from './AdminPage';
 import alumnxLogo from './assets/alumnxlogo_new.png';
 import './index.css';
 
@@ -17,6 +20,43 @@ const MODEL_PRICING = {
 function AppContent() {
   const { token, user, logout } = useAuth();
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+  const [currentUser, setCurrentUser] = useState(undefined); // undefined = loading
+  const [isAdmin, setIsAdmin]         = useState(false);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        try {
+          const token = await user.getIdToken();
+          // Register user in DB on every login
+          await fetch(`${API_BASE_URL}/admin/register`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          // Check admin status
+          const res = await fetch(`${API_BASE_URL}/admin/check`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setIsAdmin(data.is_admin === true);
+          }
+        } catch {
+          setIsAdmin(false);
+        }
+      } else {
+        setIsAdmin(false);
+      }
+    });
+    return unsub;
+  }, []);
+
+  const getToken = async () => {
+    if (!currentUser) return null;
+    return currentUser.getIdToken();
+  };
 
   const [conversations, setConversations] = useState(() => {
     const saved = localStorage.getItem('gemma_conversations');
@@ -72,15 +112,7 @@ function AppContent() {
     return [];
   });
 
-  const [userId] = useState(() => {
-    const saved = localStorage.getItem('gemma_user_id');
-    if (saved) return saved;
-    const newId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
-      ? crypto.randomUUID()
-      : `user-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    localStorage.setItem('gemma_user_id', newId);
-    return newId;
-  });
+  const userId = currentUser?.uid ?? null;
 
   const [input, setInput] = useState('');
   const [selectedModel, setSelectedModel] = useState('gemma');
@@ -230,12 +262,11 @@ function AppContent() {
         formData.append('model', selectedModel);
 
         setUploadProgress(0);
+        const fileToken = await getToken();
         data = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', `${API_BASE_URL}/chat-file`);
-          if (token) {
-            xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-          }
+          if (fileToken) xhr.setRequestHeader('Authorization', `Bearer ${fileToken}`);
           xhr.upload.onprogress = (ev) => {
             if (ev.lengthComputable) setUploadProgress(Math.round((ev.loaded / ev.total) * 100));
           };
@@ -251,11 +282,12 @@ function AppContent() {
           xhr.send(formData);
         });
       } else {
+        const token = await getToken();
         const response = await fetch(`${API_BASE_URL}/chat`, {
           method: 'POST',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({ message: trimmed, session_id: sesssionId, user_id: userId, model: selectedModel }),
         });
@@ -362,6 +394,14 @@ function AppContent() {
 
   const isImageFile = (file) => file?.type?.startsWith('image/');
 
+  if (currentUser === undefined) {
+    return <div className="auth-page"><div className="auth-card"><p style={{ color: 'var(--text-secondary)' }}>Loading...</p></div></div>;
+  }
+
+  if (!currentUser) {
+    return <AuthPage />;
+  }
+
   return (
     <div className="app-container">
       {/* ========== Sidebar ========== */}
@@ -419,6 +459,15 @@ function AppContent() {
               <span className="dashboard-nav-badge">{metricsData.length}</span>
             )}
           </button>
+          {isAdmin && (
+            <button
+              className={`dashboard-nav-btn ${view === 'admin' ? 'active' : ''}`}
+              onClick={() => setView('admin')}
+            >
+              <ShieldCheck size={15} />
+              <span>Admin</span>
+            </button>
+          )}
 {(conversations.length > 0 || messages.length > 0) && (
             <button className="dashboard-nav-btn nav-danger" onClick={clearAllConversations}>
               <Trash2 size={15} />
@@ -427,49 +476,45 @@ function AppContent() {
           )}
         </div>
 
-        <div className="sidebar-footer" style={{ paddingTop: '0.75rem', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-          <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', flex: 1 }}>
-            <div className="avatar" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent-secondary))', color: 'white', fontWeight: 600, flexShrink: 0 }}>
-              {(() => {
-                if (!user?.name) return "U";
-                return user.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
-              })()}
+        <div className="sidebar-footer">
+          <div className="user-profile">
+            <div className="avatar">
+              {currentUser?.photoURL
+                ? <img src={currentUser.photoURL} alt="avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                : (currentUser?.displayName?.[0] ?? currentUser?.email?.[0] ?? 'U').toUpperCase()
+              }
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1 }}>
-              <span style={{ fontSize: '0.84rem', fontWeight: 500, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={user?.name || 'User'}>
-                {user?.name || "User"}
-              </span>
-              <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={user?.email || ''}>
-                {user?.email || ""}
-              </span>
-            </div>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {currentUser?.displayName || currentUser?.email || 'User'}
+            </span>
           </div>
-          <div className="settings-icons" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-            <button 
-              onClick={logout} 
-              title="Log Out" 
-              style={{
-                background: "none",
-                border: "none",
-                color: "var(--text-dim)",
-                cursor: "pointer",
-                padding: "4px",
-                display: "flex",
-                alignItems: "center",
-                transition: "color 0.2s ease"
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.color = "var(--danger)"}
-              onMouseLeave={(e) => e.currentTarget.style.color = "var(--text-dim)"}
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button
+              className="settings-icons"
+              title="Settings"
+              onClick={() => setView('settings')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: view === 'settings' ? 'var(--accent)' : 'inherit' }}
             >
-              <LogOut size={16} />
+              <Settings size={18} />
             </button>
-            <Settings size={18} />
+            <button
+              className="settings-icons"
+              title="Sign out"
+              onClick={() => signOut(auth)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
+            >
+              <LogOut size={18} />
+            </button>
           </div>
         </div>
       </aside>
 
       {/* ========== Main Content ========== */}
-      {view === 'metrics' ? (
+      {view === 'settings' ? (
+        <SettingsPage theme={theme} setTheme={setTheme} />
+      ) : view === 'admin' ? (
+        <AdminPage />
+      ) : view === 'metrics' ? (
         <MetricsView
           metrics={metricsData}
           onClearMetrics={() => setMetricsData([])}

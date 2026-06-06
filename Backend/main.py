@@ -15,6 +15,8 @@ import os
 import time
 from dotenv import load_dotenv
 from analytics import router as analytics_router
+from api_keys import router as api_keys_router
+from admin_auth import router as admin_router
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -95,8 +97,11 @@ async def lifespan(app: FastAPI):
     # 1. DB — fast, must complete before serving
     await asyncio.to_thread(init_db)
     logger.info("Database initialised.")
-    init_firebase()                        # ← ADD THIS LINE
-    logger.info("Firebase initialised.")
+    try:
+        init_firebase()
+        logger.info("Firebase initialised.")
+    except RuntimeError as e:
+        logger.warning("Firebase not initialised (service account credentials missing): %s", e)
 
     # 2. Session pruner
     pruner = asyncio.create_task(prune_stale_sessions())
@@ -143,6 +148,8 @@ async def upload_file(file: UploadFile = File(...)):
         "path": file_path
     }
 app.include_router(analytics_router)
+app.include_router(api_keys_router)
+app.include_router(admin_router)
 origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 if not origins:
     origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -363,7 +370,7 @@ def _persist_query(
     has_attachment:  bool,
     attachment_type: str | None,
     pdf_chunks:      list[str] | None = None,
-    user_name:       str | None = None,
+    display_name:    str | None = None,
 ) -> None:
     """
     Sync DB writer — FastAPI runs sync background tasks in a thread pool,
@@ -375,23 +382,7 @@ def _persist_query(
     """
     db = SessionLocal()
     try:
-        from database.models import UserProfile
-        user = db.get(UserProfile, user_id)
-        now = datetime.utcnow()
-        if user is None:
-            user = UserProfile(
-                user_id      = user_id,
-                display_name = user_name or f"User-{user_id[-6:].upper()}",
-                created_at   = now,
-                last_seen    = now,
-            )
-            db.add(user)
-        else:
-            if user_name and user.display_name != user_name:
-                user.display_name = user_name
-            user.last_seen = now
-        db.commit()
-
+        upsert_user(db, user_id, display_name=display_name)
         upsert_session(db, session_id, user_id)
         if pdf_chunks:
             save_pdf_chunks(db, session_id, pdf_chunks)
@@ -421,15 +412,16 @@ def _persist_query(
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest, background_tasks: BackgroundTasks, request: Request):
-    # Access authenticated user anywhere in the route:
-    current_user = request.state.user
-    uid   = current_user["uid"]      # Firebase UID
-    email = current_user["email"]    # user@example.com
-    name  = current_user["name"]     # Display name
- 
-    # You can now override req.user_id with the verified Firebase UID
-    # so users can't spoof each other's analytics:
-    req.user_id = uid                # ← makes user_id tamper-proof
+    current_user = getattr(request.state, "user", None)
+    if current_user:
+        uid   = current_user["uid"]
+        email = current_user.get("email", "")
+        name  = current_user.get("name", "")
+    else:
+        uid   = req.user_id or "anonymous"
+        email = ""
+        name  = ""
+    req.user_id = uid
     """
     Memory-aware text chat.
 
@@ -538,7 +530,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks, request: Req
         latency_ms, cost["usd"], cost["inr"],
         req.message[:500], bool(pdf_context), "pdf" if pdf_context else None,
         None,
-        current_user.name,
+        name or email or None,
     )
 
     return ChatResponse(
@@ -558,6 +550,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks, request: Req
 @app.post("/chat-file", response_model=ChatResponse)
 async def chat_file(
     background_tasks: BackgroundTasks,
+    request:    Request,
     session_id: str        = Form(...),
     user_id:    str        = Form("anonymous"),
     message:    str        = Form(""),
@@ -573,6 +566,13 @@ async def chat_file(
       - PDFs    → text extracted by PyPDF2 → injected as context in user message
       - Audio / Video → rejected with a clear error
     """
+    file_current_user = getattr(request.state, "user", None)
+    if file_current_user:
+        user_id = file_current_user["uid"]
+        file_display_name = file_current_user.get("name") or file_current_user.get("email") or None
+    else:
+        file_display_name = None
+
     file_bytes = await file.read()
     size_mb    = len(file_bytes) / (1024 * 1024)
 
@@ -719,8 +719,8 @@ async def chat_file(
         prompt_tokens, completion_tokens, tokens_attach,
         latency_ms, cost["usd"], cost["inr"],
         message[:500], True, attachment_type,
-        _session_pdfs.get(session_id),   # saved to DB after upsert_session
-        current_user.name,
+        _session_pdfs.get(session_id),
+        file_display_name,
     )
 
     return ChatResponse(
