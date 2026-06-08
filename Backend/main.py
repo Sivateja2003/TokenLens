@@ -14,7 +14,9 @@ import logging
 import os
 import time
 from dotenv import load_dotenv
-
+from analytics import router as analytics_router
+from api_keys import router as api_keys_router
+from admin_auth import router as admin_router
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,7 +32,7 @@ import PyPDF2
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-
+from firebase_auth import FirebaseAuthMiddleware, init_firebase
 from memory import (
     add_turn_and_get_prompt,
     active_session_count,
@@ -98,6 +100,11 @@ async def lifespan(app: FastAPI):
     # 1. DB — fast, must complete before serving
     await asyncio.to_thread(init_db)
     logger.info("Database initialised.")
+    try:
+        init_firebase()
+        logger.info("Firebase initialised.")
+    except RuntimeError as e:
+        logger.warning("Firebase not initialised (service account credentials missing): %s", e)
 
     # 2. Session pruner
     pruner = asyncio.create_task(prune_stale_sessions())
@@ -126,6 +133,7 @@ async def lifespan(app: FastAPI):
 
 # ── app ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Gemma4 Chat Service", version="3.0.0", lifespan=lifespan)
+
 UPLOAD_FOLDER = "uploads"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -142,7 +150,9 @@ async def upload_file(file: UploadFile = File(...)):
         "filename": file.filename,
         "path": file_path
     }
-
+app.include_router(analytics_router)
+app.include_router(api_keys_router)
+app.include_router(admin_router)
 origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 if not origins:
     origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -157,6 +167,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(FirebaseAuthMiddleware) 
 
 
 # ── request / response models ─────────────────────────────────────────────────
@@ -376,6 +387,7 @@ def _persist_query(
     has_attachment:  bool,
     attachment_type: str | None,
     pdf_chunks:      list[str] | None = None,
+    display_name:    str | None = None,
 ) -> None:
     """
     Sync DB writer — FastAPI runs sync background tasks in a thread pool,
@@ -387,7 +399,7 @@ def _persist_query(
     """
     db = SessionLocal()
     try:
-        upsert_user(db, user_id)
+        upsert_user(db, user_id, display_name=display_name)
         upsert_session(db, session_id, user_id)
         if pdf_chunks:
             save_pdf_chunks(db, session_id, pdf_chunks)
@@ -466,7 +478,17 @@ async def require_api_key(
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
+async def chat(req: ChatRequest, background_tasks: BackgroundTasks, request: Request):
+    current_user = getattr(request.state, "user", None)
+    if current_user:
+        uid   = current_user["uid"]
+        email = current_user.get("email", "")
+        name  = current_user.get("name", "")
+    else:
+        uid   = req.user_id or "anonymous"
+        email = ""
+        name  = ""
+    req.user_id = uid
     """
     Memory-aware text chat.
 
@@ -574,6 +596,8 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks):
         prompt_tokens, completion_tokens, tokens_attach,
         latency_ms, cost["usd"], cost["inr"],
         req.message[:500], bool(pdf_context), "pdf" if pdf_context else None,
+        None,
+        name or email or None,
     )
 
     return ChatResponse(
@@ -643,6 +667,7 @@ async def public_generate(
 @app.post("/chat-file", response_model=ChatResponse)
 async def chat_file(
     background_tasks: BackgroundTasks,
+    request:    Request,
     session_id: str        = Form(...),
     user_id:    str        = Form("anonymous"),
     message:    str        = Form(""),
@@ -657,6 +682,13 @@ async def chat_file(
       - PDFs    → text extracted by PyPDF2 → injected as context in user message
       - Audio / Video → rejected with a clear error
     """
+    file_current_user = getattr(request.state, "user", None)
+    if file_current_user:
+        user_id = file_current_user["uid"]
+        file_display_name = file_current_user.get("name") or file_current_user.get("email") or None
+    else:
+        file_display_name = None
+
     file_bytes = await file.read()
     size_mb    = len(file_bytes) / (1024 * 1024)
 
@@ -803,7 +835,8 @@ async def chat_file(
         prompt_tokens, completion_tokens, tokens_attach,
         latency_ms, cost["usd"], cost["inr"],
         message[:500], True, attachment_type,
-        _session_pdfs.get(session_id),   # saved to DB after upsert_session
+        _session_pdfs.get(session_id),
+        file_display_name,
     )
 
     return ChatResponse(

@@ -75,22 +75,24 @@ def _run_migrations() -> None:
 
 # ── CRUD helpers ──────────────────────────────────────────────────────────────
 
-def upsert_user(db: Session, user_id: str) -> UserProfile:
-    """Create user on first visit; update last_seen on every subsequent request."""
+def upsert_user(db: Session, user_id: str, display_name: str | None = None) -> UserProfile:
+    """Create user on first visit; update last_seen and name on every subsequent request."""
     now  = datetime.utcnow()
     user = db.get(UserProfile, user_id)
     if user is None:
-        short = user_id[-6:].upper()
-        user  = UserProfile(
+        name = display_name or f"User-{user_id[-6:].upper()}"
+        user = UserProfile(
             user_id      = user_id,
-            display_name = f"User-{short}",
+            display_name = name,
             created_at   = now,
             last_seen    = now,
         )
         db.add(user)
-        logger.info("New user created: %s", user_id)
+        logger.info("New user created: %s (%s)", user_id, name)
     else:
         user.last_seen = now
+        if display_name:
+            user.display_name = display_name
     db.commit()
     return user
 
