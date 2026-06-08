@@ -1,13 +1,16 @@
+import hashlib
 import json
 import logging
 import os
+import secrets
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
-from .models import Base, UserProfile, ChatSession, QueryAnalytic, ApiUsage
+from .models import Base, UserProfile, ChatSession, QueryAnalytic, ApiUsage, ApiKey, AgentRun
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +177,126 @@ def log_query(
     db.add(record)
     db.commit()
     return record
+
+
+def verify_api_key(db: Session, raw_key: str) -> str | None:
+    """Hash raw key, look up in api_keys, update last_used. Returns user_id or None."""
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    row = db.query(ApiKey).filter_by(key_hash=key_hash).first()
+    if not row:
+        return None
+    row.last_used = datetime.utcnow()
+    db.commit()
+    return row.user_id
+
+
+def create_api_key(db: Session, user_id: str) -> str:
+    """Generate a new API key for the user, replacing any existing one. Returns raw key once."""
+    existing = db.query(ApiKey).filter_by(user_id=user_id).first()
+    if existing:
+        db.delete(existing)
+        db.flush()
+    raw = "tl-" + secrets.token_urlsafe(32)
+    record = ApiKey(
+        user_id    = user_id,
+        key_prefix = raw[:12],
+        key_hash   = hashlib.sha256(raw.encode()).hexdigest(),
+        created_at = datetime.utcnow(),
+    )
+    db.add(record)
+    db.commit()
+    return raw
+
+
+def get_api_key_info(db: Session, user_id: str):
+    """Return the ApiKey row for the user, or None."""
+    return db.query(ApiKey).filter_by(user_id=user_id).first()
+
+
+def revoke_api_key(db: Session, user_id: str) -> None:
+    """Delete the user's API key."""
+    row = db.query(ApiKey).filter_by(user_id=user_id).first()
+    if row:
+        db.delete(row)
+        db.commit()
+
+
+def create_agent_run(
+    db: Session,
+    *,
+    run_id:       str,
+    user_id:      str,
+    agent_name:   str,
+    model:        str,
+    query:        str | None,
+    tools_defined: str | None,
+    messages:     str,
+) -> AgentRun:
+    record = AgentRun(
+        run_id        = run_id,
+        user_id       = user_id,
+        agent_name    = agent_name,
+        model         = model,
+        query         = (query or "")[:1000] or None,
+        tools_defined = tools_defined,
+        messages      = messages,
+        started_at    = datetime.utcnow(),
+        status        = "running",
+    )
+    db.add(record)
+    db.commit()
+    return record
+
+
+def set_agent_run_progress(
+    db: Session,
+    run_id: str,
+    *,
+    status:       str,
+    tokens_in:    int,
+    tokens_out:   int,
+    cost_usd:     float,
+    cost_inr:     float,
+    latency_ms:   float,
+    tools_called: str | None = None,
+    messages:     str | None = None,
+    response:     str | None = None,
+    error:        str | None = None,
+) -> None:
+    row = db.query(AgentRun).filter_by(run_id=run_id).first()
+    if not row:
+        return
+    row.status     = status
+    row.tokens_in  = tokens_in
+    row.tokens_out = tokens_out
+    row.cost_usd   = cost_usd
+    row.cost_inr   = cost_inr
+    row.latency_ms = round(latency_ms, 2)
+    if tools_called is not None:
+        row.tools_called = tools_called
+    if messages is not None:
+        row.messages = messages
+    if response is not None:
+        row.response = response
+    if error is not None:
+        row.error = error
+    if status in ("completed", "error"):
+        row.finished_at = datetime.utcnow()
+    db.commit()
+
+
+def get_agent_run(db: Session, run_id: str) -> AgentRun | None:
+    return db.query(AgentRun).filter_by(run_id=run_id).first()
+
+
+def get_agent_runs_for_user(db: Session, user_id: str, limit: int = 100) -> list[AgentRun]:
+    return (
+        db.query(AgentRun)
+        .filter_by(user_id=user_id)
+        .order_by(AgentRun.started_at.desc())
+        .limit(limit)
+        .all()
+    )
 
 
 def log_api_usage(

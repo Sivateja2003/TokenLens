@@ -149,19 +149,52 @@ export default function SettingsPage({ theme, setTheme }) {
         {/* Usage example */}
         <div className="settings-section" style={{ marginTop: '2rem' }}>
           <h2 style={{ marginBottom: '0.75rem', fontSize: '1rem' }}>Usage example</h2>
-          <pre className="settings-code">{`# Python
-import requests
+          <pre className="settings-code">{`import requests
 
-response = requests.post(
-    "http://localhost:8000/chat",
-    headers={"Authorization": "Bearer tl-yourkey"},
-    json={
-        "message": "Explain quantum computing",
-        "session_id": "my-session",
-        "model": "gemma"   # or "gpt4"
-    }
-)
-print(response.json()["response"])`}
+API_KEY = "tl-yourkey"
+BASE    = "https://your-app.onrender.com"
+HEADERS = {"Authorization": f"Bearer {API_KEY}"}
+
+# ── single-turn (no tools) ──────────────────────────────
+resp = requests.post(f"{BASE}/v1/agent/run", headers=HEADERS, json={
+    "agent_name": "my-agent",
+    "model":      "gpt-4o-mini",
+    "messages":   [{"role": "user", "content": "What is 2+2?"}],
+})
+print(resp.json()["response"])
+
+# ── with tools (e.g. get_weather) ──────────────────────
+resp = requests.post(f"{BASE}/v1/agent/run", headers=HEADERS, json={
+    "agent_name": "weather-agent",
+    "model":      "gpt-4o-mini",
+    "messages":   [{"role": "user", "content": "Weather in Hyderabad?"}],
+    "tools": [{
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get current weather for a city",
+            "parameters": {"type": "object",
+                           "properties": {"city": {"type": "string"}},
+                           "required": ["city"]}
+        }
+    }],
+})
+data = resp.json()
+
+if data["status"] == "tool_pending":
+    # execute the tool yourself, then continue
+    tool_call = data["tool_calls"][0]
+    result    = get_weather(tool_call["function"]["arguments"])
+    final = requests.post(
+        f"{BASE}/v1/agent/run/{data['run_id']}/continue",
+        headers=HEADERS,
+        json={"tool_results": [{
+            "tool_call_id": tool_call["id"],
+            "name":    tool_call["function"]["name"],
+            "content": str(result),
+        }]},
+    ).json()
+    print(final["response"])`}
           </pre>
         </div>
 

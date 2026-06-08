@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon, LogOut, ShieldCheck } from 'lucide-react';
+import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon, LogOut, ShieldCheck, Bot } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase';
@@ -7,6 +7,7 @@ import AuthPage from './AuthPage';
 import MetricsView from './MetricsView';
 import SettingsPage from './SettingsPage';
 import AdminPage from './AdminPage';
+import AgentRunsPage from './AgentRunsPage';
 import alumnxLogo from './assets/alumnxlogo_new.png';
 import './index.css';
 
@@ -458,6 +459,13 @@ function App() {
               <span className="dashboard-nav-badge">{metricsData.length}</span>
             )}
           </button>
+          <button
+            className={`dashboard-nav-btn ${view === 'agents' ? 'active' : ''}`}
+            onClick={() => setView('agents')}
+          >
+            <Bot size={15} />
+            <span>Agent Runs</span>
+          </button>
           {isAdmin && (
             <button
               className={`dashboard-nav-btn ${view === 'admin' ? 'active' : ''}`}
@@ -513,6 +521,8 @@ function App() {
         <SettingsPage theme={theme} setTheme={setTheme} />
       ) : view === 'admin' ? (
         <AdminPage />
+      ) : view === 'agents' ? (
+        <AgentRunsPage />
       ) : view === 'metrics' ? (
         <MetricsView
           metrics={metricsData}
