@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from analytics import router as analytics_router
 from api_keys import router as api_keys_router
 from admin_auth import router as admin_router
+from agent_proxy import router as agent_proxy_router
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -150,6 +151,7 @@ async def upload_file(file: UploadFile = File(...)):
 app.include_router(analytics_router)
 app.include_router(api_keys_router)
 app.include_router(admin_router)
+app.include_router(agent_proxy_router)
 origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 if not origins:
     origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
