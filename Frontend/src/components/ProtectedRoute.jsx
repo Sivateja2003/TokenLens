@@ -1,10 +1,12 @@
-import React from "react";
+import React, { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "../hooks/useAuth";
-import Login from "./Login";
+import AuthPage from "../AuthPage";
+import LandingPage from "./LandingPage";
 
 export default function ProtectedRoute({ children }) {
   const { user, token, loading } = useAuth();
+  const [showLogin, setShowLogin] = useState(false);
 
   if (loading) {
     return (
@@ -35,7 +37,10 @@ export default function ProtectedRoute({ children }) {
   }
 
   if (!user || !token) {
-    return <Login />;
+    if (showLogin) {
+      return <AuthPage onBack={() => setShowLogin(false)} />;
+    }
+    return <LandingPage onLogin={() => setShowLogin(true)} onGetStarted={() => setShowLogin(true)} />;
   }
 
   return children;

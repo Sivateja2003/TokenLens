@@ -1,63 +1,70 @@
 import React, { useState } from 'react';
-import {
-  signInWithPopup,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  updateProfile,
-} from 'firebase/auth';
-import { auth, googleProvider } from './firebase';
+import { useAuth } from './hooks/useAuth';
 import alumnxLogo from './assets/alumnxlogo_new.png';
 
-export default function AuthPage() {
+export default function AuthPage({ onBack }) {
+  const { loginWithGoogle, loginWithEmail, signupWithEmail, error, loading } = useAuth();
   const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [localError, setLocalError] = useState('');
 
-  const clearError = () => setError('');
+  const clearError = () => setLocalError('');
 
   const handleGoogle = async () => {
-    setLoading(true);
     clearError();
     try {
-      await signInWithPopup(auth, googleProvider);
+      await loginWithGoogle();
     } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
+      console.error(e);
     }
   };
 
   const handleEmailAuth = async (e) => {
     e.preventDefault();
     if (mode === 'signup' && password !== confirmPassword) {
-      setError('Passwords do not match.');
+      setLocalError('Passwords do not match.');
       return;
     }
-    setLoading(true);
     clearError();
     try {
       if (mode === 'signup') {
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
-        if (name.trim()) {
-          await updateProfile(cred.user, { displayName: name.trim() });
-        }
+        await signupWithEmail(email, password, name);
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        await loginWithEmail(email, password);
       }
     } catch (e) {
-      setError(friendlyError(e.code));
-    } finally {
-      setLoading(false);
+      console.error(e);
     }
   };
 
   return (
     <div className="auth-page">
       <div className="auth-card">
+        {onBack && (
+          <button 
+            type="button" 
+            onClick={onBack}
+            className="auth-link" 
+            style={{ 
+              marginBottom: "0.5rem", 
+              alignSelf: "flex-start", 
+              display: "flex", 
+              alignItems: "center", 
+              gap: "4px",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "0.85rem",
+              color: "var(--text-dim)",
+              padding: "0"
+            }}
+          >
+            &larr; Back to home
+          </button>
+        )}
         <div className="auth-logo">
           <img src={alumnxLogo} alt="AlumnxLabs" className="logo-img" />
         </div>
@@ -66,7 +73,7 @@ export default function AuthPage() {
           {mode === 'signin' ? 'Sign in to continue' : 'Create your account'}
         </p>
 
-        {error && <div className="auth-error">{error}</div>}
+        {(error || localError) && <div className="auth-error">{error || localError}</div>}
 
         <button className="google-btn" onClick={handleGoogle} disabled={loading}>
           <GoogleIcon />

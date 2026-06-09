@@ -539,7 +539,6 @@ function AppContent() {
               <LogOut size={16} />
             </button>
           </div>
-          </div>
         </div>
       </aside>
 
