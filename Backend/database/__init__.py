@@ -1,4 +1,15 @@
-from .db import init_db, upsert_user, upsert_session, log_query, save_pdf_chunks, load_pdf_chunks, SessionLocal, get_db
-from .models import User
+from .db import (
+    init_db, upsert_user, upsert_session, log_query, save_pdf_chunks, load_pdf_chunks,
+    SessionLocal, get_db,
+    verify_api_key, create_api_key, get_api_key_info, revoke_api_key,
+    create_agent_run, set_agent_run_progress, get_agent_run, get_agent_runs_for_user,
+)
+from .models import QueryAnalytic, UserProfile, ApiKey, AgentRun, User
 
-__all__ = ["init_db", "upsert_user", "upsert_session", "log_query", "save_pdf_chunks", "load_pdf_chunks", "SessionLocal", "get_db", "User"]
+__all__ = [
+    "init_db", "upsert_user", "upsert_session", "log_query",
+    "save_pdf_chunks", "load_pdf_chunks", "SessionLocal", "get_db",
+    "verify_api_key", "create_api_key", "get_api_key_info", "revoke_api_key",
+    "create_agent_run", "set_agent_run_progress", "get_agent_run", "get_agent_runs_for_user",
+    "QueryAnalytic", "UserProfile", "ApiKey", "AgentRun", "User",
+]

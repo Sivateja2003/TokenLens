@@ -1,9 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon, LogOut } from 'lucide-react';
+import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon, LogOut, ShieldCheck, Bot } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth } from './firebase';
+import AuthPage from './AuthPage';
 import MetricsView from './MetricsView';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import ProtectedRoute from './components/ProtectedRoute';
+import SettingsPage from './SettingsPage';
+import AdminPage from './AdminPage';
+import AgentRunsPage from './AgentRunsPage';
 import alumnxLogo from './assets/alumnxlogo_new.png';
 import './index.css';
 
@@ -11,12 +17,49 @@ const MAX_FILE_SIZE = 3 * 1024 * 1024;
 const ALLOWED_TYPES = ['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'];
 const MODEL_PRICING = {
   gemma: { input: 0.10 / 1_000_000, output: 0.40  / 1_000_000, label: 'Gemma' },
-  gpt4:  { input: 1.10 / 1_000_000, output: 4.40  / 1_000_000, label: 'GPT-5 Nano' },
+  gpt4:  { input: 0.15 / 1_000_000, output: 0.60  / 1_000_000, label: 'GPT-4o Mini' },
 };
 
 function AppContent() {
   const { token, user, logout } = useAuth();
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+  const [currentUser, setCurrentUser] = useState(undefined); // undefined = loading
+  const [isAdmin, setIsAdmin]         = useState(false);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        try {
+          const token = await user.getIdToken();
+          // Register user in DB on every login
+          await fetch(`${API_BASE_URL}/admin/register`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          // Check admin status
+          const res = await fetch(`${API_BASE_URL}/admin/check`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setIsAdmin(data.is_admin === true);
+          }
+        } catch {
+          setIsAdmin(false);
+        }
+      } else {
+        setIsAdmin(false);
+      }
+    });
+    return unsub;
+  }, []);
+
+  const getToken = async () => {
+    if (!currentUser) return null;
+    return currentUser.getIdToken();
+  };
 
   const [conversations, setConversations] = useState(() => {
     const saved = localStorage.getItem('gemma_conversations');
@@ -72,15 +115,7 @@ function AppContent() {
     return [];
   });
 
-  const [userId] = useState(() => {
-    const saved = localStorage.getItem('gemma_user_id');
-    if (saved) return saved;
-    const newId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
-      ? crypto.randomUUID()
-      : `user-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    localStorage.setItem('gemma_user_id', newId);
-    return newId;
-  });
+  const userId = user?.id || currentUser?.uid || null;
 
   const [input, setInput] = useState('');
   const [selectedModel, setSelectedModel] = useState('gemma');
@@ -230,6 +265,7 @@ function AppContent() {
         formData.append('model', selectedModel);
 
         setUploadProgress(0);
+        const fileToken = await getToken();
         data = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', `${API_BASE_URL}/chat-file`);
@@ -362,6 +398,14 @@ function AppContent() {
 
   const isImageFile = (file) => file?.type?.startsWith('image/');
 
+  if (currentUser === undefined) {
+    return <div className="auth-page"><div className="auth-card"><p style={{ color: 'var(--text-secondary)' }}>Loading...</p></div></div>;
+  }
+
+  if (!currentUser) {
+    return <AuthPage />;
+  }
+
   return (
     <div className="app-container">
       {/* ========== Sidebar ========== */}
@@ -419,6 +463,22 @@ function AppContent() {
               <span className="dashboard-nav-badge">{metricsData.length}</span>
             )}
           </button>
+          <button
+            className={`dashboard-nav-btn ${view === 'agents' ? 'active' : ''}`}
+            onClick={() => setView('agents')}
+          >
+            <Bot size={15} />
+            <span>Agent Runs</span>
+          </button>
+          {isAdmin && (
+            <button
+              className={`dashboard-nav-btn ${view === 'admin' ? 'active' : ''}`}
+              onClick={() => setView('admin')}
+            >
+              <ShieldCheck size={15} />
+              <span>Admin</span>
+            </button>
+          )}
 {(conversations.length > 0 || messages.length > 0) && (
             <button className="dashboard-nav-btn nav-danger" onClick={clearAllConversations}>
               <Trash2 size={15} />
@@ -426,7 +486,6 @@ function AppContent() {
             </button>
           )}
         </div>
-
         <div className="sidebar-footer" style={{ paddingTop: '0.75rem', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
           <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', flex: 1 }}>
             <div className="avatar" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent-secondary))', color: 'white', fontWeight: 600, flexShrink: 0 }}>
@@ -446,6 +505,22 @@ function AppContent() {
           </div>
           <div className="settings-icons" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
             <button 
+              onClick={() => setView('settings')} 
+              title="Settings" 
+              style={{
+                background: "none",
+                border: "none",
+                color: view === 'settings' ? 'var(--accent)' : 'var(--text-dim)',
+                cursor: "pointer",
+                padding: "4px",
+                display: "flex",
+                alignItems: "center",
+                transition: "color 0.2s ease"
+              }}
+            >
+              <Settings size={18} />
+            </button>
+            <button 
               onClick={logout} 
               title="Log Out" 
               style={{
@@ -463,13 +538,19 @@ function AppContent() {
             >
               <LogOut size={16} />
             </button>
-            <Settings size={18} />
+          </div>
           </div>
         </div>
       </aside>
 
       {/* ========== Main Content ========== */}
-      {view === 'metrics' ? (
+      {view === 'settings' ? (
+        <SettingsPage theme={theme} setTheme={setTheme} getToken={getToken} />
+      ) : view === 'admin' ? (
+        <AdminPage getToken={getToken} />
+      ) : view === 'agents' ? (
+        <AgentRunsPage getToken={getToken} />
+      ) : view === 'metrics' ? (
         <MetricsView
           metrics={metricsData}
           onClearMetrics={() => setMetricsData([])}
@@ -639,7 +720,7 @@ function AppContent() {
                   ref={textareaRef}
                   value={input}
                   onChange={handleInput}
-                  placeholder={`Message ${selectedModel === 'gpt4' ? 'GPT-5 Nano' : 'TokenLens'}...`}
+                  placeholder={`Message ${selectedModel === 'gpt4' ? 'GPT-4o Mini' : 'TokenLens'}...`}
                   rows="1"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -662,7 +743,7 @@ function AppContent() {
                     className="model-select"
                   >
                     <option value="gemma">Gemma</option>
-                    <option value="gpt4">GPT-5 Nano</option>
+                    <option value="gpt4">GPT-4o Mini</option>
                   </select>
                   <button
                     type="button"
@@ -678,7 +759,7 @@ function AppContent() {
                   </button>
                 </div>
               </div>
-              <p className="disclaimer">{selectedModel === 'gpt4' ? 'GPT-5 Nano' : 'Gemma E4B'} can make mistakes. Check important info.</p>
+              <p className="disclaimer">{selectedModel === 'gpt4' ? 'GPT-4o Mini' : 'Gemma E4B'} can make mistakes. Check important info.</p>
             </form>
           </footer>
         </main>

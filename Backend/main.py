@@ -14,7 +14,11 @@ import logging
 import os
 import time
 from dotenv import load_dotenv
-
+from analytics import router as analytics_router
+from api_keys import router as api_keys_router
+from admin_auth import router as admin_router
+from agent_proxy import router as agent_proxy_router
+from fastapi.openapi.utils import get_openapi
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,12 +31,12 @@ import json
 
 import httpx
 import PyPDF2
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, Depends
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from datetime import datetime
-
+from firebase_auth import FirebaseAuthMiddleware, init_firebase
 from memory import (
     add_turn_and_get_prompt,
     active_session_count,
@@ -51,12 +55,13 @@ OLLAMA_HOST  = os.getenv("OLLAMA_HOST")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")
 OLLAMA_KEY   = os.getenv("OLLAMA_API_KEY")
 
+
 if not OLLAMA_HOST or not OLLAMA_MODEL:
     raise RuntimeError("Missing OLLAMA_HOST or OLLAMA_MODEL in .env")
 
 # OpenAI — optional. Required only when the frontend selects the gpt4 model.
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-5-nano")  # override with gpt-4o, gpt-4, etc.
+OPENAI_MODEL   = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 # Ollama embedding model for semantic PDF search.
 # Pull on your server with: ollama pull nomic-embed-text
@@ -74,14 +79,13 @@ _session_pdfs: dict[str, list[str]] = {}
 # ── pricing ───────────────────────────────────────────────────────────────────
 USD_TO_INR = float(os.getenv("USD_TO_INR", "85.0"))
 
-# GPT-5 Nano pricing (model: gpt-5-nano)
-# Input: $1.10/1M tokens  |  Output: $4.40/1M tokens
-# Update these if OpenAI changes the rates.
+# GPT-4o Mini pricing (model: gpt-4o-mini)
+# Input: $0.15/1M tokens  |  Output: $0.60/1M tokens
 _MODEL_PRICING: dict[str, dict[str, float]] = {
-    "gemma":    {"input": 0.10  / 1_000_000, "output": 0.40  / 1_000_000},
-    "gpt4":     {"input": 1.10  / 1_000_000, "output": 4.40  / 1_000_000},  # gpt-5-nano rates
-    "gpt5nano": {"input": 1.10  / 1_000_000, "output": 4.40  / 1_000_000},
-    "openai":   {"input": 1.10  / 1_000_000, "output": 4.40  / 1_000_000},
+    "gemma":      {"input": 0.10  / 1_000_000, "output": 0.40  / 1_000_000},
+    "gpt4":       {"input": 0.15  / 1_000_000, "output": 0.60  / 1_000_000},
+    "gpt4o-mini": {"input": 0.15  / 1_000_000, "output": 0.60  / 1_000_000},
+    "openai":     {"input": 0.15  / 1_000_000, "output": 0.60  / 1_000_000},
 }
 
 
@@ -97,6 +101,11 @@ async def lifespan(app: FastAPI):
     # 1. DB — fast, must complete before serving
     await asyncio.to_thread(init_db)
     logger.info("Database initialised.")
+    try:
+        init_firebase()
+        logger.info("Firebase initialised.")
+    except RuntimeError as e:
+        logger.warning("Firebase not initialised (service account credentials missing): %s", e)
 
     # 2. Session pruner
     pruner = asyncio.create_task(prune_stale_sessions())
@@ -125,6 +134,29 @@ async def lifespan(app: FastAPI):
 
 # ── app ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Gemma4 Chat Service", version="3.0.0", lifespan=lifespan)
+
+
+def _custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+    schema.setdefault("components", {})["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "Firebase JWT or tl-... API key",
+        }
+    }
+    for path in schema.get("paths", {}).values():
+        for op in path.values():
+            if isinstance(op, dict):
+                op.setdefault("security", [{"BearerAuth": []}])
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _custom_openapi
+
 UPLOAD_FOLDER = "uploads"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -141,16 +173,21 @@ async def upload_file(file: UploadFile = File(...)):
         "filename": file.filename,
         "path": file_path
     }
-
+app.include_router(analytics_router)
+app.include_router(api_keys_router)
+app.include_router(admin_router)
+app.include_router(agent_proxy_router)
 origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 if not origins:
     origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
+# Middleware order matters: add_middleware applies in REVERSE — last added runs outermost.
+# FirebaseAuthMiddleware must be inner so its 401 responses still pass through CORSMiddleware,
+# which adds the Access-Control-Allow-Origin header the browser requires.
+app.add_middleware(FirebaseAuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    # Allows any Vercel preview/production URL without manual config updates
-    # e.g. gemma-e4b-abc123-user.vercel.app AND gemma-e4b.vercel.app
     allow_origin_regex=r"https://[a-zA-Z0-9-]+\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
@@ -184,6 +221,8 @@ class ChatResponse(BaseModel):
     latency_ms:  float
     cost:        Cost
     search_mode: str = "none"   # "semantic" | "keyword" | "none"
+
+
 
 
 # ── low-level LLM callers ─────────────────────────────────────────────────────
@@ -304,7 +343,7 @@ async def call_openai_with_messages(messages: list[dict]) -> tuple[dict, float]:
 
 
 def _is_openai_model(model: str) -> bool:
-    return model.lower().strip() in ("gpt4", "gpt-4", "gpt", "gpt5nano", "gpt-5-nano", "gpt5", "openai")
+    return model.lower().strip() in ("gpt4", "gpt-4", "gpt", "gpt4o-mini", "gpt-4o-mini", "openai")
 
 
 def _parse_ollama_response(raw: str) -> dict:
@@ -361,7 +400,7 @@ def _persist_query(
     has_attachment:  bool,
     attachment_type: str | None,
     pdf_chunks:      list[str] | None = None,
-    user_name:       str | None = None,
+    display_name:    str | None = None,
 ) -> None:
     """
     Sync DB writer — FastAPI runs sync background tasks in a thread pool,
@@ -373,23 +412,7 @@ def _persist_query(
     """
     db = SessionLocal()
     try:
-        from database.models import UserProfile
-        user = db.get(UserProfile, user_id)
-        now = datetime.utcnow()
-        if user is None:
-            user = UserProfile(
-                user_id      = user_id,
-                display_name = user_name or f"User-{user_id[-6:].upper()}",
-                created_at   = now,
-                last_seen    = now,
-            )
-            db.add(user)
-        else:
-            if user_name and user.display_name != user_name:
-                user.display_name = user_name
-            user.last_seen = now
-        db.commit()
-
+        upsert_user(db, user_id, display_name=display_name)
         upsert_session(db, session_id, user_id)
         if pdf_chunks:
             save_pdf_chunks(db, session_id, pdf_chunks)
@@ -415,14 +438,21 @@ def _persist_query(
         db.close()
 
 
+
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat(
-    req: ChatRequest,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
-):
+async def chat(req: ChatRequest, background_tasks: BackgroundTasks, request: Request):
+    current_user = getattr(request.state, "user", None)
+    if current_user:
+        uid   = current_user["uid"]
+        email = current_user.get("email", "")
+        name  = current_user.get("name", "")
+    else:
+        uid   = req.user_id or "anonymous"
+        email = ""
+        name  = ""
+    req.user_id = uid
     """
     Memory-aware text chat.
 
@@ -531,7 +561,7 @@ async def chat(
         latency_ms, cost["usd"], cost["inr"],
         req.message[:500], bool(pdf_context), "pdf" if pdf_context else None,
         None,
-        current_user.name,
+        name or email or None,
     )
 
     return ChatResponse(
@@ -548,15 +578,16 @@ async def chat(
     )
 
 
+
 @app.post("/chat-file", response_model=ChatResponse)
 async def chat_file(
     background_tasks: BackgroundTasks,
+    request:    Request,
     session_id: str        = Form(...),
     user_id:    str        = Form("anonymous"),
     message:    str        = Form(""),
     model:      str        = Form("gemma"),
     file:       UploadFile = File(...),
-    current_user: User     = Depends(get_current_user),
 ):
     """
     Memory-aware multimodal chat (image or PDF).
@@ -566,6 +597,13 @@ async def chat_file(
       - PDFs    → text extracted by PyPDF2 → injected as context in user message
       - Audio / Video → rejected with a clear error
     """
+    file_current_user = getattr(request.state, "user", None)
+    if file_current_user:
+        user_id = file_current_user["uid"]
+        file_display_name = file_current_user.get("name") or file_current_user.get("email") or None
+    else:
+        file_display_name = None
+
     file_bytes = await file.read()
     size_mb    = len(file_bytes) / (1024 * 1024)
 
@@ -712,8 +750,8 @@ async def chat_file(
         prompt_tokens, completion_tokens, tokens_attach,
         latency_ms, cost["usd"], cost["inr"],
         message[:500], True, attachment_type,
-        _session_pdfs.get(session_id),   # saved to DB after upsert_session
-        current_user.name,
+        _session_pdfs.get(session_id),
+        file_display_name,
     )
 
     return ChatResponse(
