@@ -1,7 +1,7 @@
 import React from 'react';
-import { BarChart3, Layers, Database, Key, Check, BookOpen, ArrowRight } from 'lucide-react';
+import { BarChart3, Layers, Database, Key, Check, BookOpen, ArrowRight, Sun, Moon } from 'lucide-react';
 
-export default function LandingPage({ onLogin, onGetStarted }) {
+export default function LandingPage({ onLogin, onGetStarted, theme, setTheme }) {
   return (
     <div className="landing-container">
       {/* Header */}
@@ -11,6 +11,14 @@ export default function LandingPage({ onLogin, onGetStarted }) {
           <span className="landing-logo-text">TokenLens</span>
         </div>
         <div className="landing-nav-actions">
+          <button
+            onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+            className="theme-toggle-btn"
+            style={{ marginRight: '0.25rem', border: 'none', background: 'none' }}
+            title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+          >
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
           <button className="btn-nav-login" onClick={onLogin}>Login</button>
           <button className="btn-nav-primary" onClick={onGetStarted}>Get Started</button>
         </div>

@@ -4,7 +4,7 @@ import { useAuth } from "../hooks/useAuth";
 import AuthPage from "../AuthPage";
 import LandingPage from "./LandingPage";
 
-export default function ProtectedRoute({ children }) {
+export default function ProtectedRoute({ children, theme, setTheme }) {
   const { user, token, loading } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
 
@@ -40,7 +40,7 @@ export default function ProtectedRoute({ children }) {
     if (showLogin) {
       return <AuthPage onBack={() => setShowLogin(false)} />;
     }
-    return <LandingPage onLogin={() => setShowLogin(true)} onGetStarted={() => setShowLogin(true)} />;
+    return <LandingPage onLogin={() => setShowLogin(true)} onGetStarted={() => setShowLogin(true)} theme={theme} setTheme={setTheme} />;
   }
 
   return children;

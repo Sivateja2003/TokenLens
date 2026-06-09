@@ -20,7 +20,7 @@ const MODEL_PRICING = {
   gpt4:  { input: 0.15 / 1_000_000, output: 0.60  / 1_000_000, label: 'GPT-4o Mini' },
 };
 
-function AppContent() {
+function AppContent({ theme, setTheme }) {
   const { token, user, logout } = useAuth();
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -128,19 +128,9 @@ function AppContent() {
     const saved = localStorage.getItem('gemma_metrics');
     return saved ? JSON.parse(saved) : [];
   });
-  const [theme, setTheme] = useState(() => {
-    const saved = localStorage.getItem('gemma_theme');
-    return saved ? saved : 'dark';
-  });
-
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
-
-  useEffect(() => {
-    localStorage.setItem('gemma_theme', theme);
-    document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
 
   // Sync active messages to multi-conversation state and LocalStorage:
   useEffect(() => {
@@ -768,10 +758,20 @@ function AppContent() {
 }
 
 export default function App() {
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('gemma_theme');
+    return saved ? saved : 'dark';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('gemma_theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
   return (
     <AuthProvider>
-      <ProtectedRoute>
-        <AppContent />
+      <ProtectedRoute theme={theme} setTheme={setTheme}>
+        <AppContent theme={theme} setTheme={setTheme} />
       </ProtectedRoute>
     </AuthProvider>
   );
