@@ -178,17 +178,18 @@ origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.s
 if not origins:
     origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
+# Middleware order matters: add_middleware applies in REVERSE — last added runs outermost.
+# FirebaseAuthMiddleware must be inner so its 401 responses still pass through CORSMiddleware,
+# which adds the Access-Control-Allow-Origin header the browser requires.
+app.add_middleware(FirebaseAuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    # Allows any Vercel preview/production URL without manual config updates
-    # e.g. gemma-e4b-abc123-user.vercel.app AND gemma-e4b.vercel.app
     allow_origin_regex=r"https://[a-zA-Z0-9-]+\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(FirebaseAuthMiddleware) 
 
 
 # ── request / response models ─────────────────────────────────────────────────
