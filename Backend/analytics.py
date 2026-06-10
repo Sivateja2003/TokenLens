@@ -63,7 +63,7 @@ class ModelUsage(BaseModel):
     cost_inr: float
 
 
-class UserProfile(BaseModel):
+class UserProfileStats(BaseModel):
     user_id: str
     total_requests: int
     total_input_tokens: int
@@ -158,7 +158,7 @@ def _model_breakdown(db: Session, user_id: str) -> list[ModelUsage]:
 
 # ── endpoints ─────────────────────────────────────────────────────────────────
 
-@router.get("/user/{user_id}", response_model=UserProfile)
+@router.get("/user/{user_id}", response_model=UserProfileStats)
 def user_profile(user_id: str, db: Session = Depends(get_db)):
     """
     Full analytics profile for a single user.
@@ -203,7 +203,7 @@ def user_profile(user_id: str, db: Session = Depends(get_db)):
         for m in models
     )
 
-    return UserProfile(
+    return UserProfileStats(
         user_id=user_id,
         total_requests=totals.requests,
         total_input_tokens=total_input,
