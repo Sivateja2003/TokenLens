@@ -4,6 +4,7 @@ client.py — TokenLens main client.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from typing import Any, Optional
 
@@ -38,7 +39,7 @@ class TokenLens:
     def __init__(
         self,
         api_key: str,
-        base_url: str = "http://localhost:8000",
+        base_url: str = os.getenv("TOKENLENS_URL", "http://localhost:8000"),
         application: str = "tokenlens-sdk",
         background: bool = True,
         timeout: float = 10.0,
@@ -48,7 +49,9 @@ class TokenLens:
         Args:
             api_key:        Your TokenLens API key (starts with "tl-").
                             Generate one from the TokenLens dashboard under API Keys.
-            base_url:       Base URL of your TokenLens backend (default: localhost).
+            base_url:       Base URL of your TokenLens backend. Defaults to the
+                            TOKENLENS_URL environment variable, falling back to
+                            "http://localhost:8000".
             application:    Label shown in the dashboard for these log entries.
             background:     When True (default), log() sends the request in a background
                             thread and returns None immediately. Set False to block and
