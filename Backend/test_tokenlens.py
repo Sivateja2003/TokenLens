@@ -1,8 +1,12 @@
+import os
+from dotenv import load_dotenv
 from tokenlens import TokenLens
 
+load_dotenv()
+
 tl = TokenLens(
-    api_key="tl-VJomad6oeJgDbk4D4aW8qLllrGpjmC4fPhTHN0Awc_4",
-    base_url="http://localhost:8000",
+    api_key=os.getenv("TOKENLENS_KEY"),
+    base_url=os.getenv("TOKENLENS_URL", "http://localhost:8000"),
 )
 
 # No OPENAI_API_KEY needed — the backend uses its own configured LLM keys.
