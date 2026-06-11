@@ -288,11 +288,14 @@ class TokenLens:
         response_text: Optional[str] = None,
         application: Optional[str] = None,
     ) -> None:
-        """Fire-and-forget sync log — called by sync wrappers after each LLM response."""
+        """Log after an LLM response — respects the background setting."""
         payload = self._build_payload(
             model, tokens_in, tokens_out, latency_ms, query_text, application, response_text
         )
-        threading.Thread(target=self._send_sync, args=(payload,), daemon=True).start()
+        if self._background:
+            threading.Thread(target=self._send_sync, args=(payload,), daemon=True).start()
+        else:
+            self._send_sync(payload)
 
     def _send_sync(self, payload: dict) -> Optional[dict]:
         try:

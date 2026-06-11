@@ -116,6 +116,9 @@ def sdk_log(body: LogRequest, request: Request):
             latency_ms  = body.latency_ms,
         )
 
+        # Capture usage_id before the session closes (avoids DetachedInstanceError)
+        usage_id = record.usage_id
+
         # Write to agent_runs when agent_name is provided and user is authenticated
         if body.agent_name and user_id:
             log_sdk_agent_run(
@@ -135,7 +138,7 @@ def sdk_log(body: LogRequest, request: Request):
         db.close()
 
     return LogResponse(
-        usage_id     = record.usage_id,
+        usage_id     = usage_id,
         cost_usd     = cost_usd,
         cost_inr     = cost_inr,
         total_tokens = total_tokens,

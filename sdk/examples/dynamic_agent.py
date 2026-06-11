@@ -1,3 +1,15 @@
+"""
+examples/dynamic_agent.py — Tool-calling agent demo using TokenLens SDK.
+
+Prerequisites:
+    pip install tokenlens
+    Set TOKENLENS_KEY and OPENAI_API_KEY in your environment (or .env file).
+
+Usage:
+    python dynamic_agent.py "What's the weather in Hyderabad?"
+    python dynamic_agent.py "Give me an inspirational thought"
+"""
+
 import json
 import os
 import sys
@@ -5,8 +17,7 @@ import sys
 from dotenv import load_dotenv
 from tokenlens import TokenLens
 
-load_dotenv(override=True)
-load_dotenv("Backend/.env", override=False)
+load_dotenv()
 
 TOKENLENS_KEY = os.getenv("TOKENLENS_KEY", "")
 TOKENLENS_URL = os.getenv("TOKENLENS_URL", "http://localhost:8000")
@@ -19,13 +30,12 @@ tl = TokenLens(
     api_key=TOKENLENS_KEY,
     base_url=TOKENLENS_URL,
     agent_name="dynamic-agent",
-    background=False,
 )
 
 client = tl.openai()
 
 
-# ── Local tool implementations ────────────────────────────────────────────────
+# ── Tool implementations ──────────────────────────────────────────────────────
 
 def get_weather(city: str) -> str:
     return f"It's always sunny in {city}!"
@@ -105,7 +115,7 @@ def run_agent(user_input: str) -> str:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print('Usage: python dynamic_agent_input.py "<your message>"')
+        print('Usage: python dynamic_agent.py "<your message>"')
         sys.exit(1)
 
     answer = run_agent(" ".join(sys.argv[1:]))
