@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon, LogOut, ShieldCheck, Bot } from 'lucide-react';
+import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon, LogOut, ShieldCheck, Bot, Key } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase';
@@ -8,6 +8,7 @@ import MetricsView from './MetricsView';
 import SettingsPage from './SettingsPage';
 import AdminPage from './AdminPage';
 import AgentRunsPage from './AgentRunsPage';
+import ApiKeyPage from './ApiKeyPage';
 import alumnxLogo from './assets/alumnxlogo_new.png';
 import './index.css';
 
@@ -466,6 +467,13 @@ function App() {
             <Bot size={15} />
             <span>Agent Runs</span>
           </button>
+          <button
+            className={`dashboard-nav-btn ${view === 'apikey' ? 'active' : ''}`}
+            onClick={() => setView('apikey')}
+          >
+            <Key size={15} />
+            <span>API Key</span>
+          </button>
           {isAdmin && (
             <button
               className={`dashboard-nav-btn ${view === 'admin' ? 'active' : ''}`}
@@ -518,11 +526,13 @@ function App() {
 
       {/* ========== Main Content ========== */}
       {view === 'settings' ? (
-        <SettingsPage theme={theme} setTheme={setTheme} getToken={getToken} />
+        <SettingsPage theme={theme} setTheme={setTheme} />
       ) : view === 'admin' ? (
         <AdminPage getToken={getToken} />
       ) : view === 'agents' ? (
         <AgentRunsPage getToken={getToken} />
+      ) : view === 'apikey' ? (
+        <ApiKeyPage getToken={getToken} />
       ) : view === 'metrics' ? (
         <MetricsView
           metrics={metricsData}

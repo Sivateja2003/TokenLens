@@ -265,8 +265,9 @@ class TokenLens:
         query_text: Optional[str],
         application: Optional[str],
         response_text: Optional[str] = None,
+        tools_called: Optional[list] = None,
     ) -> dict:
-        return {
+        payload = {
             "application":   application or self._application,
             "agent_name":    self._agent_name,
             "model_used":    model,
@@ -276,6 +277,9 @@ class TokenLens:
             "query_text":    (query_text or "")[:500] or None,
             "response_text": (response_text or "")[:1000] or None,
         }
+        if tools_called:
+            payload["tools_called"] = tools_called
+        return payload
 
     def _log_background(
         self,
@@ -287,10 +291,12 @@ class TokenLens:
         query_text: Optional[str] = None,
         response_text: Optional[str] = None,
         application: Optional[str] = None,
+        tools_called: Optional[list] = None,
     ) -> None:
         """Log after an LLM response — respects the background setting."""
         payload = self._build_payload(
-            model, tokens_in, tokens_out, latency_ms, query_text, application, response_text
+            model, tokens_in, tokens_out, latency_ms, query_text, application, response_text,
+            tools_called,
         )
         if self._background:
             threading.Thread(target=self._send_sync, args=(payload,), daemon=True).start()

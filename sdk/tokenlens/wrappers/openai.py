@@ -38,6 +38,10 @@ class _WrappedCompletions:
     def __init__(self, completions: Any, tl: "TokenLens") -> None:
         self._c = completions
         self._tl = tl
+        self._tool_buf: list = []
+        self._buf_tokens_in: int = 0
+        self._buf_tokens_out: int = 0
+        self._buf_latency_ms: float = 0.0
 
     def create(self, **kwargs) -> Any:
         t0 = time.perf_counter()
@@ -46,15 +50,39 @@ class _WrappedCompletions:
         usage = getattr(response, "usage", None)
         if usage:
             choices = getattr(response, "choices", [])
-            response_text = choices[0].message.content if choices else None
-            self._tl._log_background(
-                model=kwargs.get("model", "unknown"),
-                tokens_in=getattr(usage, "prompt_tokens", 0) or 0,
-                tokens_out=getattr(usage, "completion_tokens", 0) or 0,
-                latency_ms=latency_ms,
-                query_text=_first_user_text(kwargs.get("messages", [])),
-                response_text=response_text,
-            )
+            msg = choices[0].message if choices else None
+            tool_calls = getattr(msg, "tool_calls", None) if msg else None
+
+            if tool_calls:
+                # Intermediate step: accumulate tool calls and tokens, don't log yet
+                for tc in tool_calls:
+                    self._tool_buf.append({
+                        "name":  tc.function.name,
+                        "input": tc.function.arguments,
+                    })
+                self._buf_tokens_in  += getattr(usage, "prompt_tokens",     0) or 0
+                self._buf_tokens_out += getattr(usage, "completion_tokens",  0) or 0
+                self._buf_latency_ms += latency_ms
+            else:
+                # Final step: log once with accumulated tools + totals
+                tokens_in  = self._buf_tokens_in  + (getattr(usage, "prompt_tokens",    0) or 0)
+                tokens_out = self._buf_tokens_out + (getattr(usage, "completion_tokens", 0) or 0)
+                total_latency = self._buf_latency_ms + latency_ms
+                tools = self._tool_buf or None
+                # Reset buffer for next logical agent run
+                self._tool_buf = []
+                self._buf_tokens_in = self._buf_tokens_out = 0
+                self._buf_latency_ms = 0.0
+
+                self._tl._log_background(
+                    model=kwargs.get("model", "unknown"),
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    latency_ms=total_latency,
+                    query_text=_first_user_text(kwargs.get("messages", [])),
+                    response_text=msg.content if msg else None,
+                    tools_called=tools,
+                )
         return response
 
     def __getattr__(self, name: str) -> Any:

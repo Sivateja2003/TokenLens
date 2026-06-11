@@ -69,6 +69,7 @@ class LogRequest(BaseModel):
     latency_ms:    float
     query_text:    Optional[str] = None
     response_text: Optional[str] = None        # assistant reply captured by wrappers
+    tools_called:  Optional[list] = None       # tool invocations from an agent loop
 
 
 class LogResponse(BaseModel):
@@ -133,6 +134,7 @@ def sdk_log(body: LogRequest, request: Request):
                 cost_usd      = cost_usd,
                 cost_inr      = cost_inr,
                 latency_ms    = body.latency_ms,
+                tools_called  = body.tools_called,
             )
     finally:
         db.close()
