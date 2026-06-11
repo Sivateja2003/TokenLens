@@ -259,8 +259,9 @@ function AppContent({ theme, setTheme }) {
         data = await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
           xhr.open('POST', `${API_BASE_URL}/chat-file`);
-          if (token) {
-            xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+          const finalToken = token || fileToken;
+          if (finalToken) {
+            xhr.setRequestHeader('Authorization', `Bearer ${finalToken}`);
           }
           xhr.upload.onprogress = (ev) => {
             if (ev.lengthComputable) setUploadProgress(Math.round((ev.loaded / ev.total) * 100));
@@ -279,9 +280,9 @@ function AppContent({ theme, setTheme }) {
       } else {
         const response = await fetch(`${API_BASE_URL}/chat`, {
           method: 'POST',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({ message: trimmed, session_id: sesssionId, user_id: userId, model: selectedModel }),
         });
@@ -496,17 +497,21 @@ function AppContent({ theme, setTheme }) {
             </button>
           )}
         </div>
+        
         <div className="sidebar-footer">
           <div className="user-profile">
             <div className="avatar">
-              {(() => {
-                if (!user?.name) return "U";
-                return user.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+              {currentUser?.photoURL ? (
+                <img src={currentUser.photoURL} alt="avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+              ) : (() => {
+                const displayName = user?.name || currentUser?.displayName || currentUser?.email;
+                if (!displayName) return "U";
+                return displayName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
               })()}
             </div>
             <div className="user-info">
-              <span className="user-name" title={user?.name || 'User'}>
-                {user?.name || "User"}
+              <span className="user-name" title={user?.name || currentUser?.displayName || currentUser?.email || 'User'}>
+                {user?.name || currentUser?.displayName || currentUser?.email || "User"}
               </span>
             </div>
           </div>
