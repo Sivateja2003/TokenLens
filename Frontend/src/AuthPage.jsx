@@ -2,19 +2,21 @@ import React, { useState } from 'react';
 import { useAuth } from './hooks/useAuth';
 import alumnxLogo from './assets/alumnxlogo_new.png';
 
-export default function AuthPage({ onBack }) {
-  const { loginWithGoogle, loginWithEmail, signupWithEmail, error, loading } = useAuth();
-  const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
+export default function AuthPage({ onBack, initialMode = 'signin' }) {
+  const { loginWithGoogle, loginWithEmail, signupWithEmail, resetPassword, error, submitting } = useAuth();
+  const [mode, setMode] = useState(initialMode); // 'signin' | 'signup' | 'forgotpassword'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
   const [localError, setLocalError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const clearError = () => setLocalError('');
 
   const handleGoogle = async () => {
     clearError();
+    setSuccessMessage('');
     try {
       await loginWithGoogle();
     } catch (e) {
@@ -29,12 +31,39 @@ export default function AuthPage({ onBack }) {
       return;
     }
     clearError();
+    setSuccessMessage('');
     try {
       if (mode === 'signup') {
         await signupWithEmail(email, password, name);
       } else {
         await loginWithEmail(email, password);
       }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    clearError();
+    setSuccessMessage('');
+    if (!email) {
+      setLocalError('Please enter your email address.');
+      return;
+    }
+    if (!password) {
+      setLocalError('Please enter a new password.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setLocalError('Passwords do not match.');
+      return;
+    }
+    try {
+      await resetPassword(email, password);
+      setSuccessMessage('Password reset successfully! You can now sign in.');
+      setPassword('');
+      setConfirmPassword('');
     } catch (e) {
       console.error(e);
     }
@@ -70,81 +99,149 @@ export default function AuthPage({ onBack }) {
         </div>
         <h1 className="auth-title">TOKENLENS</h1>
         <p className="auth-subtitle">
-          {mode === 'signin' ? 'Sign in to continue' : 'Create your account'}
+          {mode === 'signin' 
+            ? 'Sign in to continue' 
+            : mode === 'signup' 
+              ? 'Create your account' 
+              : 'Reset your password'}
         </p>
 
         {(error || localError) && <div className="auth-error">{error || localError}</div>}
+        {successMessage && <div className="auth-success" style={{ width: '100%', backgroundColor: 'rgba(52, 211, 153, 0.1)', color: '#10B981', border: '1px solid rgba(52, 211, 153, 0.2)', borderRadius: '8px', padding: '0.625rem 0.875rem', fontSize: '0.85rem', textAlign: 'center', marginBottom: '1rem' }}>{successMessage}</div>}
 
-        <button className="google-btn" onClick={handleGoogle} disabled={loading}>
-          <GoogleIcon />
-          Continue with Google
-        </button>
-
-        <div className="auth-divider"><span>or</span></div>
-
-        <form onSubmit={handleEmailAuth} className="auth-form">
-          {mode === 'signup' && (
-            <input
-              type="text"
-              placeholder="Full name"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              required
-              className="auth-input"
-              autoComplete="name"
-            />
-          )}
-          <input
-            type="email"
-            placeholder="Email address"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            required
-            className="auth-input"
-            autoComplete="email"
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            required
-            minLength={6}
-            className="auth-input"
-            autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-          />
-          {mode === 'signup' && (
-            <input
-              type="password"
-              placeholder="Confirm password"
-              value={confirmPassword}
-              onChange={e => setConfirmPassword(e.target.value)}
-              required
-              minLength={6}
-              className="auth-input"
-              autoComplete="new-password"
-            />
-          )}
-          <button type="submit" className="auth-submit-btn" disabled={loading}>
-            {loading ? 'Please wait...' : mode === 'signin' ? 'Sign In' : 'Create Account'}
-          </button>
-        </form>
-
-        <p className="auth-switch">
-          {mode === 'signin' ? (
-            <>Don't have an account?{' '}
-              <button className="auth-link" onClick={() => { setMode('signup'); clearError(); setConfirmPassword(''); }}>
-                Sign up
+        {mode === 'forgotpassword' ? (
+          <>
+            <form onSubmit={handleResetPassword} className="auth-form" style={{ width: '100%' }}>
+              <input
+                type="email"
+                placeholder="Email address"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                className="auth-input"
+                autoComplete="email"
+              />
+              <input
+                type="password"
+                placeholder="New password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required
+                minLength={6}
+                className="auth-input"
+                autoComplete="new-password"
+              />
+              <input
+                type="password"
+                placeholder="Confirm new password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                required
+                minLength={6}
+                className="auth-input"
+                autoComplete="new-password"
+              />
+              <button type="submit" className="auth-submit-btn" disabled={submitting} style={{ marginTop: '0.5rem' }}>
+                {submitting ? 'Please wait...' : 'Reset Password'}
               </button>
-            </>
-          ) : (
-            <>Already have an account?{' '}
-              <button className="auth-link" onClick={() => { setMode('signin'); clearError(); setConfirmPassword(''); }}>
-                Sign in
+            </form>
+            <button
+              type="button"
+              className="auth-link"
+              onClick={() => { setMode('signin'); clearError(); setSuccessMessage(''); setPassword(''); setConfirmPassword(''); }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-dim)', padding: '0', display: 'block', margin: '1.25rem auto 0' }}
+            >
+              &larr; Back to Sign In
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="google-btn" onClick={handleGoogle} disabled={submitting}>
+              <GoogleIcon />
+              Continue with Google
+            </button>
+
+            <div className="auth-divider"><span>or</span></div>
+
+            <form onSubmit={handleEmailAuth} className="auth-form">
+              {mode === 'signup' && (
+                <input
+                  type="text"
+                  placeholder="Full name"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  required
+                  className="auth-input"
+                  autoComplete="name"
+                />
+              )}
+              <input
+                type="email"
+                placeholder="Email address"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                className="auth-input"
+                autoComplete="email"
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required
+                minLength={6}
+                className="auth-input"
+                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+              />
+              
+              {mode === 'signin' && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%', marginTop: '-0.25rem', marginBottom: '0.55rem' }}>
+                  <button
+                    type="button"
+                    className="auth-link"
+                    onClick={() => { setMode('forgotpassword'); clearError(); setSuccessMessage(''); setPassword(''); setConfirmPassword(''); }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.78rem', color: 'var(--text-dim)', padding: '0' }}
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+              )}
+
+              {mode === 'signup' && (
+                <input
+                  type="password"
+                  placeholder="Confirm password"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  className="auth-input"
+                  autoComplete="new-password"
+                />
+              )}
+              <button type="submit" className="auth-submit-btn" disabled={submitting}>
+                {submitting ? 'Please wait...' : mode === 'signin' ? 'Sign In' : 'Create Account'}
               </button>
-            </>
-          )}
-        </p>
+            </form>
+
+            <p className="auth-switch">
+              {mode === 'signin' ? (
+                <>Don't have an account?{' '}
+                  <button className="auth-link" onClick={() => { setMode('signup'); clearError(); setConfirmPassword(''); }}>
+                    Sign up
+                  </button>
+                </>
+              ) : (
+                <>Already have an account?{' '}
+                  <button className="auth-link" onClick={() => { setMode('signin'); clearError(); setConfirmPassword(''); }}>
+                    Sign in
+                  </button>
+                </>
+              )}
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

@@ -47,7 +47,7 @@ from memory import (
 )
 from memory.store import delete as delete_session
 from database import init_db, upsert_user, upsert_session, log_query, save_pdf_chunks, load_pdf_chunks, SessionLocal, get_db, User
-from auth import LoginPayload, get_current_user, create_jwt, decode_jwt_payload_unverified
+from auth import LoginPayload, ResetPasswordPayload, get_current_user, create_jwt, decode_jwt_payload_unverified
 
 
 # ── env ───────────────────────────────────────────────────────────────────────
@@ -198,7 +198,7 @@ app.add_middleware(
 # ── request / response models ─────────────────────────────────────────────────
 class ChatRequest(BaseModel):
     session_id: str = Field(..., min_length=1, description="Unique conversation ID")
-    user_id:    str = Field(default="anonymous", description="Persistent anonymous user ID from localStorage")
+    user_id:    str | None = Field(default="anonymous", description="Persistent anonymous user ID from localStorage")
     message:    str = Field(..., min_length=1, description="User message text")
     model:      str = Field(default="gemma", description="Tokenizer model: 'gemma' (SentencePiece) or 'gpt4' (BPE)")
 
@@ -873,6 +873,52 @@ def login_with_firebase(payload: LoginPayload, db: Session = Depends(get_db)):
             "role": user.role
         }
     }
+
+
+@app.post("/api/auth/reset-password")
+def reset_password(payload: ResetPasswordPayload, db: Session = Depends(get_db)):
+    """
+    Directly updates a user's password in Firebase using Admin SDK.
+    Also validates that the user exists locally.
+    """
+    email = payload.email.strip().lower() if payload.email else ""
+    new_password = payload.new_password
+
+    if not email or not new_password:
+        raise HTTPException(
+            status_code=400,
+            detail="Email and new password are required."
+        )
+
+    # 1. Update in Firebase if initialized
+    from firebase_auth import _firebase_app
+    if _firebase_app is not None:
+        try:
+            from firebase_admin import auth as admin_auth
+            fb_user = admin_auth.get_user_by_email(email)
+            admin_auth.update_user(fb_user.uid, password=new_password)
+        except admin_auth.UserNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail="No account found with this email in Firebase."
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Firebase password reset failed: {str(e)}"
+            )
+    else:
+        logger.warning("Firebase not initialised — bypassing password update for %s", email)
+
+    # 2. Check if user exists in local database
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="No account found with this email in local database."
+        )
+
+    return {"message": "Password reset successfully."}
 
 
 # ── entry point ───────────────────────────────────────────────────────────────

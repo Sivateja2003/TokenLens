@@ -7,6 +7,7 @@ import LandingPage from "./LandingPage";
 export default function ProtectedRoute({ children, theme, setTheme }) {
   const { user, token, loading } = useAuth();
   const [showLogin, setShowLogin] = useState(false);
+  const [authMode, setAuthMode] = useState('signin');
 
   if (loading) {
     return (
@@ -38,9 +39,22 @@ export default function ProtectedRoute({ children, theme, setTheme }) {
 
   if (!user || !token) {
     if (showLogin) {
-      return <AuthPage onBack={() => setShowLogin(false)} />;
+      return <AuthPage initialMode={authMode} onBack={() => setShowLogin(false)} />;
     }
-    return <LandingPage onLogin={() => setShowLogin(true)} onGetStarted={() => setShowLogin(true)} theme={theme} setTheme={setTheme} />;
+    return (
+      <LandingPage
+        onLogin={() => {
+          setAuthMode('signin');
+          setShowLogin(true);
+        }}
+        onGetStarted={() => {
+          setAuthMode('signup');
+          setShowLogin(true);
+        }}
+        theme={theme}
+        setTheme={setTheme}
+      />
+    );
   }
 
   return children;

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
-import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
+import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail } from "firebase/auth";
 import { auth, googleProvider } from "../firebase";
 
 const AuthContext = createContext(null);
@@ -10,6 +10,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
   // Restore session from localStorage on mount
@@ -58,10 +59,10 @@ export function AuthProvider({ children }) {
   // Sign in using real Firebase Google auth
   const loginWithGoogle = async () => {
     setError("");
-    setLoading(true);
+    setSubmitting(true);
     
     if (!auth || !googleProvider) {
-      setLoading(false);
+      setSubmitting(false);
       const errMsg = "Firebase Auth is not configured. Please set VITE_FIREBASE_* environment variables in Frontend/.env.";
       setError(errMsg);
       throw new Error(errMsg);
@@ -75,38 +76,40 @@ export function AuthProvider({ children }) {
       let friendlyMsg = err.message || "Google Sign-In failed.";
       if (err.code === "auth/invalid-api-key" || err.code === "auth/api-key-not-valid") {
         friendlyMsg = "Firebase configuration is invalid. Please check your environment variables.";
+      } else if (err.code === "auth/operation-not-allowed") {
+        friendlyMsg = "Google Sign-In is not enabled in your Firebase Console. Go to Authentication > Sign-in method, click Add New Provider, select Google, enable it, and save.";
       }
       setError(friendlyMsg);
       throw err;
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
   const loginWithEmail = async (email, password) => {
     setError("");
-    setLoading(true);
+    setSubmitting(true);
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
       const idToken = await result.user.getIdToken();
       await exchangeTokenForJWT(idToken);
     } catch (err) {
       let friendlyMsg = err.message || "Email Sign-In failed.";
-      if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password") {
+      if (err.code === "auth/user-not-found" || err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
         friendlyMsg = "Invalid email or password.";
-      } else if (err.code === "auth/invalid-credential") {
-        friendlyMsg = "Invalid email or password.";
+      } else if (err.code === "auth/operation-not-allowed") {
+        friendlyMsg = "Email/Password sign-in is not enabled in your Firebase Console. Go to Authentication > Sign-in method, click Email/Password, enable it, and save.";
       }
       setError(friendlyMsg);
       throw new Error(friendlyMsg);
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
   const signupWithEmail = async (email, password, name) => {
     setError("");
-    setLoading(true);
+    setSubmitting(true);
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
       if (name.trim()) {
@@ -120,11 +123,36 @@ export function AuthProvider({ children }) {
         friendlyMsg = "An account with this email already exists.";
       } else if (err.code === "auth/weak-password") {
         friendlyMsg = "Password must be at least 6 characters.";
+      } else if (err.code === "auth/operation-not-allowed") {
+        friendlyMsg = "Email/Password sign-in is not enabled in your Firebase Console. Go to Authentication > Sign-in method, click Email/Password, enable it, and save.";
       }
       setError(friendlyMsg);
       throw new Error(friendlyMsg);
     } finally {
-      setLoading(false);
+      setSubmitting(false);
+    }
+  };
+
+  const resetPassword = async (email, newPassword) => {
+    setError("");
+    setSubmitting(true);
+    try {
+      const response = await fetch(`${AUTH_API_URL}/api/auth/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, new_password: newPassword }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.detail || "Password reset failed.");
+      }
+      return await response.json();
+    } catch (err) {
+      setError(err.message || "Password reset failed.");
+      throw err;
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -151,10 +179,12 @@ export function AuthProvider({ children }) {
     user,
     token,
     loading,
+    submitting,
     error,
     loginWithGoogle,
     loginWithEmail,
     signupWithEmail,
+    resetPassword,
     logout,
     isFirebaseConfigured: !!(auth && googleProvider),
   };

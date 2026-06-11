@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, LayoutDashboard, Sun, Moon, LogOut, ShieldCheck, Bot } from 'lucide-react';
+import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, Layers, Users, Sun, Moon, LogOut, ShieldCheck, Bot } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase';
@@ -401,8 +401,28 @@ function AppContent({ theme, setTheme }) {
       {/* ========== Sidebar ========== */}
       <aside className="sidebar">
         <div className="sidebar-header">
-          <div className="logo">
-            <img src={alumnxLogo} alt="AlumnxLabs" className="logo-img" />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', padding: '0 0.25rem' }}>
+            <div className="logo">
+              <img src={alumnxLogo} alt="AlumnxLabs" className="logo-img" style={{ maxHeight: '28px', width: 'auto' }} />
+            </div>
+            <button
+              onClick={logout}
+              title="Log Out"
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                padding: "4px",
+                display: "flex",
+                alignItems: "center",
+                transition: "color 0.2s ease"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.color = "var(--danger)"}
+              onMouseLeave={(e) => e.currentTarget.style.color = "var(--text-muted)"}
+            >
+              <LogOut size={18} />
+            </button>
           </div>
           <button
             className="new-chat-btn"
@@ -447,7 +467,7 @@ function AppContent({ theme, setTheme }) {
             className={`dashboard-nav-btn ${view === 'metrics' ? 'active' : ''}`}
             onClick={() => setView('metrics')}
           >
-            <LayoutDashboard size={15} />
+            <Layers size={15} />
             <span>TokenLens</span>
             {metricsData.length > 0 && (
               <span className="dashboard-nav-badge">{metricsData.length}</span>
@@ -457,7 +477,7 @@ function AppContent({ theme, setTheme }) {
             className={`dashboard-nav-btn ${view === 'agents' ? 'active' : ''}`}
             onClick={() => setView('agents')}
           >
-            <Bot size={15} />
+            <Users size={15} />
             <span>Agent Runs</span>
           </button>
           {isAdmin && (
@@ -469,65 +489,26 @@ function AppContent({ theme, setTheme }) {
               <span>Admin</span>
             </button>
           )}
-{(conversations.length > 0 || messages.length > 0) && (
+          {(conversations.length > 0 || messages.length > 0) && (
             <button className="dashboard-nav-btn nav-danger" onClick={clearAllConversations}>
               <Trash2 size={15} />
               <span>Clear History</span>
             </button>
           )}
         </div>
-        <div className="sidebar-footer" style={{ paddingTop: '0.75rem', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-          <div className="user-profile" style={{ display: 'flex', alignItems: 'center', gap: '8px', overflow: 'hidden', flex: 1 }}>
-            <div className="avatar" style={{ background: 'linear-gradient(135deg, var(--accent), var(--accent-secondary))', color: 'white', fontWeight: 600, flexShrink: 0 }}>
+        <div className="sidebar-footer">
+          <div className="user-profile">
+            <div className="avatar">
               {(() => {
                 if (!user?.name) return "U";
                 return user.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
               })()}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', flex: 1 }}>
-              <span style={{ fontSize: '0.84rem', fontWeight: 500, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={user?.name || 'User'}>
+            <div className="user-info">
+              <span className="user-name" title={user?.name || 'User'}>
                 {user?.name || "User"}
               </span>
-              <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={user?.email || ''}>
-                {user?.email || ""}
-              </span>
             </div>
-          </div>
-          <div className="settings-icons" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-            <button 
-              onClick={() => setView('settings')} 
-              title="Settings" 
-              style={{
-                background: "none",
-                border: "none",
-                color: view === 'settings' ? 'var(--accent)' : 'var(--text-dim)',
-                cursor: "pointer",
-                padding: "4px",
-                display: "flex",
-                alignItems: "center",
-                transition: "color 0.2s ease"
-              }}
-            >
-              <Settings size={18} />
-            </button>
-            <button 
-              onClick={logout} 
-              title="Log Out" 
-              style={{
-                background: "none",
-                border: "none",
-                color: "var(--text-dim)",
-                cursor: "pointer",
-                padding: "4px",
-                display: "flex",
-                alignItems: "center",
-                transition: "color 0.2s ease"
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.color = "var(--danger)"}
-              onMouseLeave={(e) => e.currentTarget.style.color = "var(--text-dim)"}
-            >
-              <LogOut size={16} />
-            </button>
           </div>
         </div>
       </aside>
@@ -551,22 +532,34 @@ function AppContent({ theme, setTheme }) {
           <header className="chat-header">
             <div className="header-title">
               <div className="header-title-icon">T</div>
-              <h1>TOKENLENS</h1>
+              <h1 style={{ fontFamily: 'var(--font-heading)', fontWeight: '700', fontSize: '1.1rem', letterSpacing: '0.5px' }}>TOKENLENS</h1>
             </div>
-            <button
-              onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
-              className="theme-toggle-btn"
-              title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
-            >
-              {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <button
+                onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+                className="theme-toggle-btn"
+                style={{ padding: '8px', border: '1px solid var(--border)', background: 'var(--card-bg)', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+              >
+                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
+              <button
+                onClick={() => setView(prev => prev === 'settings' ? 'chat' : 'settings')}
+                className="header-settings-btn"
+                title="Settings"
+              >
+                <Settings size={16} />
+              </button>
+            </div>
           </header>
 
           <div className="messages-container">
             {messages.length === 0 ? (
               <div className="message system-message">
                 <div className="message-content">
-                  <div className="bot-avatar">G</div>
+                  <div className="bot-avatar">
+                    <GoogleIcon />
+                  </div>
                   <div className="text">
                     <h2>Hello! I'm Gemma E4B.</h2>
                     <p>Ask me anything or attach a PDF / image to get started.</p>
@@ -583,7 +576,15 @@ function AppContent({ theme, setTheme }) {
                 <div key={i} className={`message ${m.role}-message`}>
                   <div className="message-content">
                     <div className={m.role === 'user' ? 'user-avatar' : 'bot-avatar'}>
-                      {m.role === 'user' ? <User size={20} /> : 'G'}
+                      {m.role === 'user' ? (
+                        currentUser?.photoURL ? (
+                          <img src={currentUser.photoURL} alt="User avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                        ) : (
+                          <User size={18} />
+                        )
+                      ) : (
+                        <GoogleIcon />
+                      )}
                     </div>
                     <div className="text">
                       {m.image && (
@@ -620,40 +621,44 @@ function AppContent({ theme, setTheme }) {
                       {m.role === 'bot' && m.metrics && (
                         <div className="message-metrics">
                           <div className="metrics-header-row">
-                            <span className="metrics-title">⚡ METRICS ({m.metrics?.modelLabel || 'Gemma'})</span>
-                            <span className="metrics-latency">⏱️ {(m.metrics?.latencyMs ?? 0) >= 1000 ? `${((m.metrics?.latencyMs ?? 0) / 1000).toFixed(2)}s` : `${m.metrics?.latencyMs ?? 0}ms`}</span>
+                            <div className="metrics-title-group">
+                              <span className="metrics-bolt-icon">⚡</span>
+                              <span className="metrics-title">METRICS ({(m.metrics?.modelLabel || 'Gemma').toUpperCase()})</span>
+                            </div>
+                            <div className="metrics-latency-pill">
+                              <span className="metrics-clock-icon">⏱️</span>
+                              <span className="metrics-latency-text">
+                                {(m.metrics?.latencyMs ?? 0) >= 1000 
+                                  ? `${((m.metrics?.latencyMs ?? 0) / 1000).toFixed(2)}s` 
+                                  : `${m.metrics?.latencyMs ?? 0}ms`}
+                              </span>
+                            </div>
                           </div>
                           <div className="metrics-row-grid">
-                            <div className="metric-chip">
-                              <span className="metric-chip-label">Input Text</span>
-                              <span className="metric-chip-val">{m.metrics?.inputTextTokens ?? 0} Tokens</span>
+                            <div className="metric-subcard">
+                              <span className="metric-subcard-label">INPUT TEXT</span>
+                              <span className="metric-subcard-val">{m.metrics?.inputTextTokens ?? 0} Tokens</span>
                             </div>
-                            <div className="metric-chip">
-                              <span className="metric-chip-label">Input Attachments</span>
-                              <span className="metric-chip-val">{m.metrics?.inputAttachmentTokens ?? 0} Tokens</span>
+                            <div className="metric-subcard">
+                              <span className="metric-subcard-label">INPUT ATTACHMENTS</span>
+                              <span className="metric-subcard-val">{m.metrics?.inputAttachmentTokens ?? 0} Tokens</span>
                             </div>
-                            <div className="metric-chip">
-                              <span className="metric-chip-label">Output Tokens</span>
-                              <span className="metric-chip-val">{m.metrics?.outputTokens ?? 0} Tokens</span>
+                            <div className="metric-subcard">
+                              <span className="metric-subcard-label">OUTPUT TOKENS</span>
+                              <span className="metric-subcard-val">{m.metrics?.outputTokens ?? 0} Tokens</span>
                             </div>
-                          </div>
-                          <div className="metrics-cost-section">
-                            <div className="cost-breakdown-row">
-                              <div className="cost-breakdown-col">
-                                <span className="cost-lbl">Input Cost</span>
-                                <span className="cost-val-usd">${(m.metrics?.inputCostUsd ?? 0).toFixed(6)}</span>
-                                <span className="cost-val-inr">₹{(m.metrics?.inputCostInr ?? 0).toFixed(4)}</span>
-                              </div>
-                              <div className="cost-breakdown-col">
-                                <span className="cost-lbl">Output Cost</span>
-                                <span className="cost-val-usd">${(m.metrics?.outputCostUsd ?? 0).toFixed(6)}</span>
-                                <span className="cost-val-inr">₹{(m.metrics?.outputCostInr ?? 0).toFixed(4)}</span>
-                              </div>
-                              <div className="cost-breakdown-col highlight">
-                                <span className="cost-lbl">Total Cost</span>
-                                <span className="cost-val-usd font-bold">${(m.metrics?.totalCostUsd ?? 0).toFixed(6)}</span>
-                                <span className="cost-val-inr font-bold">₹{(m.metrics?.totalCostInr ?? 0).toFixed(4)}</span>
-                              </div>
+                            <div className="metric-subcard">
+                              <span className="metric-subcard-label">INPUT COST</span>
+                              <span className="metric-subcard-val">${(m.metrics?.inputCostUsd ?? 0).toFixed(6)}</span>
+                            </div>
+                            <div className="metric-subcard">
+                              <span className="metric-subcard-label">OUTPUT COST</span>
+                              <span className="metric-subcard-val">${(m.metrics?.outputCostUsd ?? 0).toFixed(6)}</span>
+                            </div>
+                            <div className="metric-subcard total-cost-card">
+                              <span className="metric-subcard-label">TOTAL COST</span>
+                              <span className="metric-subcard-val">${(m.metrics?.totalCostUsd ?? 0).toFixed(6)}</span>
+                              <span className="metric-subcard-subval">₹{(m.metrics?.totalCostInr ?? 0).toFixed(4)}</span>
                             </div>
                           </div>
                         </div>
@@ -666,7 +671,9 @@ function AppContent({ theme, setTheme }) {
             {isLoading && (
               <div className="message bot-message">
                 <div className="message-content">
-                  <div className="bot-avatar">G</div>
+                  <div className="bot-avatar">
+                    <GoogleIcon />
+                  </div>
                   <div className="typing">
                     <span></span><span></span><span></span>
                   </div>
@@ -709,7 +716,7 @@ function AppContent({ theme, setTheme }) {
                   ref={textareaRef}
                   value={input}
                   onChange={handleInput}
-                  placeholder={`Message ${selectedModel === 'gpt4' ? 'GPT-4o Mini' : 'TokenLens'}...`}
+                  placeholder={`Message TokenLens...`}
                   rows="1"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
@@ -757,10 +764,21 @@ function AppContent({ theme, setTheme }) {
   );
 }
 
+function GoogleIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+      <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
+      <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+      <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+      <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+    </svg>
+  );
+}
+
 export default function App() {
   const [theme, setTheme] = useState(() => {
     const saved = localStorage.getItem('gemma_theme');
-    return saved ? saved : 'dark';
+    return saved ? saved : 'light';
   });
 
   useEffect(() => {

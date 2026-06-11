@@ -23,6 +23,10 @@ security = HTTPBearer(auto_error=False)
 class LoginPayload(BaseModel):
     id_token: str
 
+class ResetPasswordPayload(BaseModel):
+    email: str
+    new_password: str
+
 def base64url_encode(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b'=').decode('utf-8')
 

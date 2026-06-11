@@ -35,6 +35,7 @@ PUBLIC_ROUTES = {
     "/openapi.json",
     "/redoc",
     "/api/auth/login",
+    "/api/auth/reset-password",
 }
 
 _firebase_app = None
