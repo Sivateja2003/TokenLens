@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, Layers, Users, Sun, Moon, LogOut, ShieldCheck, Bot } from 'lucide-react';
+import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, Layers, Users, LayoutDashboard, Sun, Moon, LogOut, ShieldCheck, Bot, Key } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase';
@@ -10,6 +10,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import SettingsPage from './SettingsPage';
 import AdminPage from './AdminPage';
 import AgentRunsPage from './AgentRunsPage';
+import ApiKeyPage from './ApiKeyPage';
 import alumnxLogo from './assets/alumnxlogo_new.png';
 import './index.css';
 
@@ -33,10 +34,15 @@ function AppContent({ theme, setTheme }) {
       if (user) {
         try {
           const token = await user.getIdToken();
-          // Register user in DB on every login
+          const signupOrg  = localStorage.getItem('signup_organization') || null;
+          const signupRole = localStorage.getItem('signup_role') || null;
+          localStorage.removeItem('signup_organization');
+          localStorage.removeItem('signup_role');
+          // Register user in DB on every login; pass signup profile fields on first registration
           await fetch(`${API_BASE_URL}/admin/register`, {
             method: 'POST',
-            headers: { Authorization: `Bearer ${token}` },
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ organization: signupOrg, role: signupRole }),
           });
           // Check admin status
           const res = await fetch(`${API_BASE_URL}/admin/check`, {
@@ -481,6 +487,13 @@ function AppContent({ theme, setTheme }) {
             <Users size={15} />
             <span>Agent Runs</span>
           </button>
+          <button
+            className={`dashboard-nav-btn ${view === 'apikey' ? 'active' : ''}`}
+            onClick={() => setView('apikey')}
+          >
+            <Key size={15} />
+            <span>API Key</span>
+          </button>
           {isAdmin && (
             <button
               className={`dashboard-nav-btn ${view === 'admin' ? 'active' : ''}`}
@@ -520,11 +533,13 @@ function AppContent({ theme, setTheme }) {
 
       {/* ========== Main Content ========== */}
       {view === 'settings' ? (
-        <SettingsPage theme={theme} setTheme={setTheme} getToken={getToken} />
+        <SettingsPage theme={theme} setTheme={setTheme} />
       ) : view === 'admin' ? (
         <AdminPage getToken={getToken} />
       ) : view === 'agents' ? (
         <AgentRunsPage getToken={getToken} />
+      ) : view === 'apikey' ? (
+        <ApiKeyPage getToken={getToken} />
       ) : view === 'metrics' ? (
         <MetricsView
           metrics={metricsData}

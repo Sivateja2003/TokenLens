@@ -60,17 +60,26 @@ def _run_migrations() -> None:
     try:
         with engine.connect() as conn:
             if _is_sqlite:
-                # SQLite: check PRAGMA, add only if missing
-                existing = {r[1] for r in conn.execute(text("PRAGMA table_info(chat_sessions)"))}
-                if "pdf_chunks" not in existing:
+                existing_sessions = {r[1] for r in conn.execute(text("PRAGMA table_info(chat_sessions)"))}
+                if "pdf_chunks" not in existing_sessions:
                     conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN pdf_chunks TEXT"))
                     conn.commit()
                     logger.info("Migration: added pdf_chunks column (SQLite).")
+
+                existing_users = {r[1] for r in conn.execute(text("PRAGMA table_info(user_profiles)"))}
+                if "organization" not in existing_users:
+                    conn.execute(text("ALTER TABLE user_profiles ADD COLUMN organization VARCHAR(128)"))
+                    conn.commit()
+                    logger.info("Migration: added organization column (SQLite).")
+                if "role" not in existing_users:
+                    conn.execute(text("ALTER TABLE user_profiles ADD COLUMN role VARCHAR(64)"))
+                    conn.commit()
+                    logger.info("Migration: added role column (SQLite).")
             else:
                 # PostgreSQL: IF NOT EXISTS handles idempotency natively
-                conn.execute(text(
-                    "ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS pdf_chunks TEXT"
-                ))
+                conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS pdf_chunks TEXT"))
+                conn.execute(text("ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS organization VARCHAR(128)"))
+                conn.execute(text("ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS role VARCHAR(64)"))
                 conn.commit()
     except Exception as exc:
         logger.warning("Migration skipped (non-fatal): %s", exc)
@@ -78,8 +87,14 @@ def _run_migrations() -> None:
 
 # ── CRUD helpers ──────────────────────────────────────────────────────────────
 
-def upsert_user(db: Session, user_id: str, display_name: str | None = None) -> UserProfile:
-    """Create user on first visit; update last_seen and name on every subsequent request."""
+def upsert_user(
+    db: Session,
+    user_id: str,
+    display_name: str | None = None,
+    organization: str | None = None,
+    role: str | None = None,
+) -> UserProfile:
+    """Create user on first visit; update last_seen and profile fields on every subsequent request."""
     now  = datetime.utcnow()
     user = db.get(UserProfile, user_id)
     if user is None:
@@ -87,6 +102,8 @@ def upsert_user(db: Session, user_id: str, display_name: str | None = None) -> U
         user = UserProfile(
             user_id      = user_id,
             display_name = name,
+            organization = organization,
+            role         = role,
             created_at   = now,
             last_seen    = now,
         )
@@ -96,6 +113,10 @@ def upsert_user(db: Session, user_id: str, display_name: str | None = None) -> U
         user.last_seen = now
         if display_name:
             user.display_name = display_name
+        if organization:
+            user.organization = organization
+        if role:
+            user.role = role
     db.commit()
     return user
 
@@ -309,6 +330,45 @@ def get_agent_runs_for_user(db: Session, user_id: str, limit: int = 100) -> list
         .limit(limit)
         .all()
     )
+
+
+def log_sdk_agent_run(
+    db: Session,
+    *,
+    user_id:      str,
+    agent_name:   str,
+    model:        str,
+    query_text:   str | None,
+    response_text: str | None,
+    tokens_in:    int,
+    tokens_out:   int,
+    cost_usd:     float,
+    cost_inr:     float,
+    latency_ms:   float,
+    tools_called: list | None = None,
+) -> AgentRun:
+    """Create a completed AgentRun row from an SDK log call."""
+    now = datetime.utcnow()
+    record = AgentRun(
+        run_id       = str(uuid.uuid4()),
+        user_id      = user_id,
+        agent_name   = agent_name,
+        model        = model,
+        query        = (query_text or "")[:1000] or None,
+        response     = (response_text or "")[:2000] or None,
+        status       = "completed",
+        tokens_in    = tokens_in,
+        tokens_out   = tokens_out,
+        cost_usd     = cost_usd,
+        cost_inr     = cost_inr,
+        latency_ms   = round(latency_ms, 2),
+        tools_called = json.dumps(tools_called) if tools_called else None,
+        started_at   = now,
+        finished_at  = now,
+    )
+    db.add(record)
+    db.commit()
+    return record
 
 
 def log_api_usage(

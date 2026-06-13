@@ -11,6 +11,8 @@ export default function AuthPage({ onBack, initialMode = 'signin' }) {
   const [name, setName] = useState('');
   const [localError, setLocalError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [organization, setOrganization] = useState('');
+  const [role, setRole] = useState('');
 
   const clearError = () => setLocalError('');
 
@@ -45,6 +47,8 @@ export default function AuthPage({ onBack, initialMode = 'signin' }) {
           setPassword('');
           setConfirmPassword('');
         }
+        if (organization.trim()) localStorage.setItem('signup_organization', organization.trim());
+        if (role) localStorage.setItem('signup_role', role);
       } else {
         await loginWithEmail(email, password);
       }
@@ -185,6 +189,31 @@ export default function AuthPage({ onBack, initialMode = 'signin' }) {
                   autoComplete="name"
                 />
               )}
+              {mode === 'signup' && (
+                <input
+                  type="text"
+                  placeholder="Organization / Company (optional)"
+                  value={organization}
+                  onChange={e => setOrganization(e.target.value)}
+                  className="auth-input"
+                  autoComplete="organization"
+                />
+              )}
+              {mode === 'signup' && (
+                <select
+                  value={role}
+                  onChange={e => setRole(e.target.value)}
+                  className="auth-input"
+                >
+                  <option value="">Select your role (optional)</option>
+                  <option value="developer">Developer / Engineer</option>
+                  <option value="data_scientist">Data Scientist</option>
+                  <option value="ml_engineer">ML Engineer</option>
+                  <option value="product_manager">Product Manager</option>
+                  <option value="devops">DevOps / SRE</option>
+                  <option value="other">Other</option>
+                </select>
+              )}
               <input
                 type="email"
                 placeholder="Email address"
@@ -238,7 +267,7 @@ export default function AuthPage({ onBack, initialMode = 'signin' }) {
             <p className="auth-switch">
               {mode === 'signin' ? (
                 <>Don't have an account?{' '}
-                  <button className="auth-link" onClick={() => { setMode('signup'); clearError(); setConfirmPassword(''); }}>
+                  <button className="auth-link" onClick={() => { setMode('signup'); clearError(); setConfirmPassword(''); setOrganization(''); setRole(''); }}>
                     Sign up
                   </button>
                 </>
@@ -270,13 +299,16 @@ function GoogleIcon() {
 
 function friendlyError(code) {
   const map = {
-    'auth/user-not-found':      'No account found with this email.',
-    'auth/wrong-password':      'Incorrect password.',
-    'auth/email-already-in-use':'An account with this email already exists.',
-    'auth/weak-password':       'Password must be at least 6 characters.',
-    'auth/invalid-email':       'Please enter a valid email address.',
-    'auth/too-many-requests':   'Too many attempts. Please try again later.',
-    'auth/popup-closed-by-user':'Sign-in popup was closed.',
+    'auth/user-not-found':        'No account found with this email.',
+    'auth/wrong-password':        'Incorrect password.',
+    'auth/invalid-credential':    'Incorrect email or password.',
+    'auth/email-already-in-use':  'An account with this email already exists.',
+    'auth/weak-password':         'Password must be at least 6 characters.',
+    'auth/invalid-email':         'Please enter a valid email address.',
+    'auth/too-many-requests':     'Too many attempts. Please try again later.',
+    'auth/popup-closed-by-user':  'Sign-in popup was closed.',
+    'auth/operation-not-allowed': 'Email/password sign-in is not enabled. Contact the administrator.',
+    'auth/network-request-failed':'Network error. Check your connection and try again.',
   };
-  return map[code] || 'Something went wrong. Please try again.';
+  return map[code] || `Something went wrong (${code || 'unknown'}). Please try again.`;
 }
