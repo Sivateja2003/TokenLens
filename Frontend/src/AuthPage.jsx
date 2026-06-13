@@ -18,7 +18,11 @@ export default function AuthPage({ onBack, initialMode = 'signin' }) {
     clearError();
     setSuccessMessage('');
     try {
-      await loginWithGoogle();
+      const res = await loginWithGoogle(mode === 'signup');
+      if (res && res.isNewUser) {
+        setSuccessMessage('Registration successful! Please sign in with Google to continue.');
+        setMode('signin');
+      }
     } catch (e) {
       console.error(e);
     }
@@ -34,7 +38,13 @@ export default function AuthPage({ onBack, initialMode = 'signin' }) {
     setSuccessMessage('');
     try {
       if (mode === 'signup') {
-        await signupWithEmail(email, password, name);
+        const res = await signupWithEmail(email, password, name);
+        if (res && res.success) {
+          setSuccessMessage('Registration successful! Please sign in with your credentials.');
+          setMode('signin');
+          setPassword('');
+          setConfirmPassword('');
+        }
       } else {
         await loginWithEmail(email, password);
       }

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
-import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail } from "firebase/auth";
+import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, sendPasswordResetEmail, getAdditionalUserInfo } from "firebase/auth";
 import { auth, googleProvider } from "../firebase";
 
 const AuthContext = createContext(null);
@@ -57,7 +57,7 @@ export function AuthProvider({ children }) {
   };
 
   // Sign in using real Firebase Google auth
-  const loginWithGoogle = async () => {
+  const loginWithGoogle = async (isRegistering = false) => {
     setError("");
     setSubmitting(true);
     
@@ -70,8 +70,17 @@ export function AuthProvider({ children }) {
 
     try {
       const result = await signInWithPopup(auth, googleProvider);
+      const additionalInfo = getAdditionalUserInfo(result);
+      const isNewUser = !!additionalInfo?.isNewUser;
+      
+      if (isRegistering && isNewUser) {
+        await auth.signOut();
+        return { success: true, isNewUser: true };
+      }
+
       const idToken = await result.user.getIdToken();
       await exchangeTokenForJWT(idToken);
+      return { success: true, isNewUser: false };
     } catch (err) {
       let friendlyMsg = err.message || "Google Sign-In failed.";
       if (err.code === "auth/invalid-api-key" || err.code === "auth/api-key-not-valid") {
@@ -115,8 +124,8 @@ export function AuthProvider({ children }) {
       if (name.trim()) {
         await updateProfile(result.user, { displayName: name.trim() });
       }
-      const idToken = await result.user.getIdToken();
-      await exchangeTokenForJWT(idToken);
+      await auth.signOut();
+      return { success: true };
     } catch (err) {
       let friendlyMsg = err.message || "Email Sign-Up failed.";
       if (err.code === "auth/email-already-in-use") {
