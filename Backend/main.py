@@ -204,9 +204,10 @@ app.add_middleware(
 # ── request / response models ─────────────────────────────────────────────────
 class ChatRequest(BaseModel):
     session_id: str = Field(..., min_length=1, description="Unique conversation ID")
-    user_id:    str | None = Field(default="anonymous", description="Persistent anonymous user ID from localStorage")
+    user_id:    str | int | None = Field(default="anonymous", description="Persistent anonymous user ID from localStorage")
     message:    str = Field(..., min_length=1, description="User message text")
     model:      str = Field(default="gemma", description="Tokenizer model: 'gemma' (SentencePiece) or 'gpt4' (BPE)")
+
 
 
 class Usage(BaseModel):
@@ -329,7 +330,12 @@ async def call_openai_with_messages(messages: list[dict]) -> tuple[dict, float]:
     latency_ms = (time.perf_counter() - t0) * 1000
 
     if r.status_code != 200:
-        raise HTTPException(r.status_code, f"OpenAI error: {r.text}")
+        try:
+            err_data = r.json()
+            err_msg = err_data.get("error", {}).get("message", r.text)
+        except Exception:
+            err_msg = r.text
+        raise HTTPException(r.status_code, f"OpenAI Error: {err_msg}")
 
     data    = r.json()
     content = data["choices"][0]["message"]["content"]
@@ -497,7 +503,7 @@ async def chat(req: ChatRequest, background_tasks: BackgroundTasks, request: Req
         email = current_user.get("email", "")
         name  = current_user.get("name", "")
     else:
-        uid   = req.user_id or "anonymous"
+        uid   = str(req.user_id) if req.user_id is not None else "anonymous"
         email = ""
         name  = ""
     req.user_id = uid
