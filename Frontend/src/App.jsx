@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, Layers, Users, LayoutDashboard, Sun, Moon, LogOut, ShieldCheck, Bot, Key } from 'lucide-react';
+import { Plus, Settings, Send, User, Paperclip, Trash2, X, FileText, Image, Layers, Users, LayoutDashboard, Sun, Moon, LogOut, ShieldCheck, Bot, Key, MessageSquare, Zap, Clock, DollarSign, TrendingUp } from 'lucide-react';
+import { ResponsiveContainer, LineChart, Line, BarChart, Bar, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import ReactMarkdown from 'react-markdown';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth } from './firebase';
@@ -21,12 +22,187 @@ const MODEL_PRICING = {
   gpt4:  { input: 0.15 / 1_000_000, output: 0.60  / 1_000_000, label: 'GPT-4o Mini' },
 };
 
+const INR_RATE = 84.5;
+
+const TOOLTIP_STYLE = {
+  backgroundColor: '#1a1a1e',
+  border: '1px solid rgba(255,255,255,0.08)',
+  borderRadius: '8px',
+  color: '#f0f0f2',
+  fontSize: '0.8rem',
+  padding: '8px 12px',
+};
+
+const LABEL_STYLE = { color: '#9ca3af', marginBottom: 4 };
+
+function fmt(n) {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(Math.round(n));
+}
+
+function DashboardMetricCard({ icon: Icon, label, value, sub, color, gradient }) {
+  return (
+    <div className="metric-card" style={{ '--card-color': color, flex: 1, minWidth: '200px' }}>
+      <div className="metric-card-icon" style={{ background: gradient }}>
+        <Icon size={18} />
+      </div>
+      <div className="metric-card-body">
+        <p className="metric-card-label">{label}</p>
+        <p className="metric-card-value">{value}</p>
+        {sub && <p className="metric-card-sub">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+function DashboardMetrics({ metrics }) {
+  const stats = React.useMemo(() => {
+    if (!metrics || !metrics.length) return null;
+    const totalPrompt = metrics.reduce((s, m) => s + (m.prompt_tokens || 0), 0);
+    const totalCompletion = metrics.reduce((s, m) => s + (m.completion_tokens || 0), 0);
+    const latencies = metrics.map(m => m.latency_ms || 0);
+    const avgLatency = latencies.reduce((s, v) => s + v, 0) / latencies.length;
+    const totalCostUsd = metrics.reduce((s, m) => s + (m.cost_usd || 0), 0);
+    return {
+      totalPrompt,
+      totalCompletion,
+      totalTokens: totalPrompt + totalCompletion,
+      avgLatency,
+      minLatency: Math.min(...latencies),
+      maxLatency: Math.max(...latencies),
+      totalCostUsd,
+      totalCostInr: totalCostUsd * INR_RATE,
+      avgCostUsd: totalCostUsd / metrics.length,
+    };
+  }, [metrics]);
+
+  const chartData = React.useMemo(() => {
+    if (!metrics) return [];
+    return metrics.slice(-15).map((m, i) => ({
+      name: `#${metrics.length - Math.min(15, metrics.length) + i + 1}`,
+      prompt: m.prompt_tokens || 0,
+      completion: m.completion_tokens || 0,
+      latency: Math.round(m.latency_ms || 0),
+      cost: parseFloat(((m.cost_usd || 0) * 1_000_000).toFixed(3)),
+    }));
+  }, [metrics]);
+
+  if (!metrics || !metrics.length) {
+    return (
+      <div className="metrics-empty" style={{ minHeight: '200px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+        <LayoutDashboard size={36} strokeWidth={1} style={{ marginBottom: '0.5rem' }} />
+        <p>No analytics data yet. Send a message to start tracking metrics in real-time.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      {/* Cards Row */}
+      <div className="metric-cards-grid" style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem' }}>
+        <DashboardMetricCard
+          icon={Zap}
+          label="Total Tokens"
+          value={fmt(stats.totalTokens)}
+          sub={`${fmt(stats.totalPrompt)} in · ${fmt(stats.totalCompletion)} out`}
+          color="#7c6df0"
+          gradient="linear-gradient(135deg, #7c6df0, #c084fc)"
+        />
+        <DashboardMetricCard
+          icon={Clock}
+          label="Avg Latency"
+          value={`${Math.round(stats.avgLatency)} ms`}
+          sub={`Min ${Math.round(stats.minLatency)} · Max ${Math.round(stats.maxLatency)} ms`}
+          color="#34d399"
+          gradient="linear-gradient(135deg, #10b981, #34d399)"
+        />
+        <DashboardMetricCard
+          icon={DollarSign}
+          label="Total Cost (USD)"
+          value={`$${stats.totalCostUsd < 0.0001
+            ? stats.totalCostUsd.toExponential(2)
+            : stats.totalCostUsd.toFixed(6)}`}
+          sub={`${metrics.length} request${metrics.length !== 1 ? 's' : ''} · avg $${stats.avgCostUsd.toExponential(2)}`}
+          color="#f59e0b"
+          gradient="linear-gradient(135deg, #d97706, #f59e0b)"
+        />
+        <DashboardMetricCard
+          icon={TrendingUp}
+          label="Total Cost (INR)"
+          value={`₹${stats.totalCostInr.toFixed(4)}`}
+          sub={`Rate ₹${INR_RATE}/USD`}
+          color="#fb923c"
+          gradient="linear-gradient(135deg, #ea580c, #fb923c)"
+        />
+      </div>
+
+      {/* Charts Row */}
+      <div className="metrics-charts" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
+        <div className="metrics-chart-card">
+          <h3 className="chart-title">Token Usage per Request</h3>
+          <ResponsiveContainer width="100%" height={180}>
+            <LineChart data={chartData} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey="name" tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmt} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={LABEL_STYLE} />
+              <Legend wrapperStyle={{ fontSize: '0.74rem', paddingTop: '4px' }} />
+              <Line type="monotone" dataKey="prompt" name="Input" stroke="#7c6df0" strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+              <Line type="monotone" dataKey="completion" name="Output" stroke="#c084fc" strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div className="metrics-chart-card">
+          <h3 className="chart-title">Response Latency (ms)</h3>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={chartData} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+              <XAxis dataKey="name" tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} axisLine={false} tickLine={false} />
+              <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={LABEL_STYLE} formatter={(v) => [`${v} ms`, 'Latency']} />
+              <Bar dataKey="latency" name="Latency" fill="#34d399" radius={[3, 3, 0, 0]} maxBarSize={25} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AppContent({ theme, setTheme }) {
   const { token, user, logout } = useAuth();
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
   const [currentUser, setCurrentUser] = useState(undefined); // undefined = loading
   const [isAdmin, setIsAdmin]         = useState(false);
+  const [ollamaConnected, setOllamaConnected] = useState(true);
+  const [currentTime, setCurrentTime] = useState('');
+
+  useEffect(() => {
+    const checkOllama = () => {
+      fetch(`${API_BASE_URL}/health`)
+        .then(res => {
+          if (res.ok) setOllamaConnected(true);
+          else setOllamaConnected(false);
+        })
+        .catch(() => setOllamaConnected(false));
+    };
+    checkOllama();
+    const interval = setInterval(checkOllama, 10000); // Check every 10 seconds
+    return () => clearInterval(interval);
+  }, [API_BASE_URL]);
+
+  useEffect(() => {
+    const updateTime = () => {
+      const now = new Date();
+      setCurrentTime(now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' ' + now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }));
+    };
+    updateTime();
+    const interval = setInterval(updateTime, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
@@ -121,7 +297,7 @@ function AppContent({ theme, setTheme }) {
     return [];
   });
 
-  const userId = user?.id || currentUser?.uid || null;
+  const userId = user?.id ? String(user.id) : (currentUser?.uid || null);
 
   const [input, setInput] = useState('');
   const [selectedModel, setSelectedModel] = useState('gemma');
@@ -277,7 +453,12 @@ function AppContent({ theme, setTheme }) {
               try { resolve(JSON.parse(xhr.responseText)); }
               catch { reject(new Error('Invalid response from server')); }
             } else {
-              reject(new Error('Failed to process file'));
+              let errMsg = 'Failed to process file';
+              try {
+                const errJson = JSON.parse(xhr.responseText);
+                if (errJson.detail) errMsg = errJson.detail;
+              } catch {}
+              reject(new Error(errMsg));
             }
           };
           xhr.onerror = () => reject(new Error('Failed to process file'));
@@ -292,7 +473,11 @@ function AppContent({ theme, setTheme }) {
           },
           body: JSON.stringify({ message: trimmed, session_id: sesssionId, user_id: userId, model: selectedModel }),
         });
-        if (!response.ok) throw new Error('Failed to connect to Gemma E4B');
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          const errMsg = errData.detail || `HTTP error! Status: ${response.status}`;
+          throw new Error(errMsg);
+        }
         data = await response.json();
       }
       const latencyMs = Date.now() - startTime;
@@ -407,42 +592,86 @@ function AppContent({ theme, setTheme }) {
     <div className="app-container">
       {/* ========== Sidebar ========== */}
       <aside className="sidebar">
-        <div className="sidebar-header">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', padding: '0 0.25rem' }}>
-            <div className="logo">
-              <img src={alumnxLogo} alt="AlumnxLabs" className="logo-img" style={{ maxHeight: '28px', width: 'auto' }} />
-            </div>
-            <button
-              onClick={logout}
-              title="Log Out"
-              style={{
-                background: "none",
-                border: "none",
-                color: "var(--text-muted)",
-                cursor: "pointer",
-                padding: "4px",
-                display: "flex",
-                alignItems: "center",
-                transition: "color 0.2s ease"
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.color = "var(--danger)"}
-              onMouseLeave={(e) => e.currentTarget.style.color = "var(--text-muted)"}
-            >
-              <LogOut size={18} />
-            </button>
+        <div className="sidebar-logo-container">
+          <div className="logo" style={{ marginBottom: 0, padding: 0 }}>
+            <div className="logo-icon">TL</div>
+            <span style={{ fontSize: '1.2rem', fontWeight: 'bold', fontFamily: 'var(--font-heading)' }}>TokenLens</span>
           </div>
-          <button
-            className="new-chat-btn"
-            onClick={() => {
-              setMessages([]);
-              setSelectedFile(null);
-              setSessionId('sess-' + Date.now());
-              setView('chat');
-            }}
-          >
-            <Plus size={18} /> New Chat
-          </button>
         </div>
+
+        {/* Navigation Tabs List */}
+        <div className="sidebar-menu-tabs">
+          <button
+            className={`sidebar-tab-btn ${view === 'chat' ? 'active' : ''}`}
+            onClick={() => setView('chat')}
+          >
+            <MessageSquare size={16} />
+            <span>Chat</span>
+          </button>
+          
+          <button
+            className={`sidebar-tab-btn ${view === 'metrics' ? 'active' : ''}`}
+            onClick={() => setView('metrics')}
+          >
+            <Layers size={16} />
+            <span>TokenLens</span>
+            {metricsData.length > 0 && (
+              <span className="dashboard-nav-badge">{metricsData.length}</span>
+            )}
+          </button>
+          
+          <button
+            className={`sidebar-tab-btn ${view === 'agents' ? 'active' : ''}`}
+            onClick={() => setView('agents')}
+          >
+            <Bot size={16} />
+            <span>Agent Runs</span>
+          </button>
+          
+          <button
+            className={`sidebar-tab-btn ${view === 'apikey' ? 'active' : ''}`}
+            onClick={() => setView('apikey')}
+          >
+            <Key size={16} />
+            <span>API Keys</span>
+          </button>
+          
+          <button
+            className={`sidebar-tab-btn ${view === 'settings' ? 'active' : ''}`}
+            onClick={() => setView('settings')}
+          >
+            <Settings size={16} />
+            <span>Settings</span>
+          </button>
+
+          {isAdmin && (
+            <button
+              className={`sidebar-tab-btn ${view === 'admin' ? 'active' : ''}`}
+              onClick={() => setView('admin')}
+            >
+              <ShieldCheck size={16} />
+              <span>Admin</span>
+            </button>
+          )}
+        </div>
+
+        <div className="sidebar-divider" />
+
+        {/* Chat History Section */}
+        <div className="sidebar-section-title">Recent Chats</div>
+        
+        <button
+          className="new-chat-btn"
+          style={{ marginBottom: '0.75rem' }}
+          onClick={() => {
+            setMessages([]);
+            setSelectedFile(null);
+            setSessionId('sess-' + Date.now());
+            setView('chat');
+          }}
+        >
+          <Plus size={18} /> New Chat
+        </button>
 
         <div className="chat-history">
           {!conversations.some(c => c.id === sesssionId) && (
@@ -468,51 +697,52 @@ function AppContent({ theme, setTheme }) {
           ))}
         </div>
 
-        {/* ===== Bottom navigation ===== */}
-        <div className="sidebar-nav">
-          <button
-            className={`dashboard-nav-btn ${view === 'metrics' ? 'active' : ''}`}
-            onClick={() => setView('metrics')}
+        {/* Model Selection Panel */}
+        <div className="sidebar-model-panel">
+          <div className="sidebar-model-header">
+            <span className="sidebar-model-label">Active Model</span>
+            <span className={`status-dot ${ollamaConnected ? 'green' : 'red'}`}></span>
+          </div>
+          <select
+            className="sidebar-model-dropdown"
+            value={selectedModel}
+            onChange={(e) => setSelectedModel(e.target.value)}
           >
-            <Layers size={15} />
-            <span>TokenLens</span>
-            {metricsData.length > 0 && (
-              <span className="dashboard-nav-badge">{metricsData.length}</span>
-            )}
-          </button>
-          <button
-            className={`dashboard-nav-btn ${view === 'agents' ? 'active' : ''}`}
-            onClick={() => setView('agents')}
-          >
-            <Users size={15} />
-            <span>Agent Runs</span>
-          </button>
-          <button
-            className={`dashboard-nav-btn ${view === 'apikey' ? 'active' : ''}`}
-            onClick={() => setView('apikey')}
-          >
-            <Key size={15} />
-            <span>API Key</span>
-          </button>
-          {isAdmin && (
+            <option value="gemma">Gemma</option>
+            <option value="gpt4">GPT-4o Mini</option>
+          </select>
+          <div className="sidebar-model-pills">
             <button
-              className={`dashboard-nav-btn ${view === 'admin' ? 'active' : ''}`}
-              onClick={() => setView('admin')}
+              className={`sidebar-model-pill ${selectedModel === 'gemma' ? 'active' : ''}`}
+              onClick={() => setSelectedModel('gemma')}
             >
-              <ShieldCheck size={15} />
-              <span>Admin</span>
+              Gemma (Local)
             </button>
-          )}
-          {(conversations.length > 0 || messages.length > 0) && (
-            <button className="dashboard-nav-btn nav-danger" onClick={clearAllConversations}>
-              <Trash2 size={15} />
-              <span>Clear History</span>
+            <button
+              className={`sidebar-model-pill ${selectedModel === 'gpt4' ? 'active' : ''}`}
+              onClick={() => setSelectedModel('gpt4')}
+            >
+              GPT-4o Mini
             </button>
-          )}
+          </div>
         </div>
+
+        {/* Ollama Connection status box */}
+        <div className="sidebar-status-box">
+          <div className="sidebar-status-header">
+            <span className={`status-dot ${ollamaConnected ? 'green' : 'red'}`}></span>
+            <span>Ollama {ollamaConnected ? 'Connected' : 'Offline'}</span>
+          </div>
+          <span className="sidebar-status-subtext">
+            {ollamaConnected ? 'http://localhost:11434' : 'Connection failed'}
+          </span>
+        </div>
+
+        <div className="sidebar-divider" />
         
-        <div className="sidebar-footer">
-          <div className="user-profile">
+        {/* Footer with user info & theme toggle & logout */}
+        <div className="sidebar-footer" style={{ padding: '0.25rem 0', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+          <div className="user-profile" style={{ flex: 1 }}>
             <div className="avatar">
               {currentUser?.photoURL ? (
                 <img src={currentUser.photoURL} alt="avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
@@ -523,10 +753,51 @@ function AppContent({ theme, setTheme }) {
               })()}
             </div>
             <div className="user-info">
-              <span className="user-name" title={user?.name || currentUser?.displayName || currentUser?.email || 'User'}>
+              <span className="user-name" title={user?.name || currentUser?.displayName || currentUser?.email || 'User'} style={{ maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.82rem', fontWeight: 600 }}>
                 {user?.name || currentUser?.displayName || currentUser?.email || "User"}
               </span>
             </div>
+          </div>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <button
+              onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+              className="theme-toggle-btn"
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                padding: "6px",
+                display: "flex",
+                alignItems: "center",
+                borderRadius: "4px",
+                transition: "all 0.2s ease"
+              }}
+              title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+            >
+              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
+            
+            <button
+              onClick={logout}
+              title="Log Out"
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--text-muted)",
+                cursor: "pointer",
+                padding: "6px",
+                display: "flex",
+                alignItems: "center",
+                borderRadius: "4px",
+                transition: "color 0.2s ease"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.color = "var(--danger)"}
+              onMouseLeave={(e) => e.currentTarget.style.color = "var(--text-muted)"}
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         </div>
       </aside>
@@ -548,236 +819,261 @@ function AppContent({ theme, setTheme }) {
           setTheme={setTheme}
         />
       ) : (
-        <main className="main-chat">
-          <header className="chat-header">
-            <div className="header-title">
-              <div className="header-title-icon">T</div>
-              <h1 style={{ fontFamily: 'var(--font-heading)', fontWeight: '700', fontSize: '1.1rem', letterSpacing: '0.5px' }}>TOKENLENS</h1>
+        <main className="dashboard-main">
+          {/* Header */}
+          <header className="dashboard-header">
+            <div className="dashboard-header-title">
+              <h1>DASHBOARD</h1>
+              <p>Monitor your AI connections, sessions, and token metrics in real-time.</p>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <button
-                onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
-                className="theme-toggle-btn"
-                style={{ padding: '8px', border: '1px solid var(--border)', background: 'var(--card-bg)', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
-              >
-                {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-              </button>
-              <button
-                onClick={() => setView(prev => prev === 'settings' ? 'chat' : 'settings')}
-                className="header-settings-btn"
-                title="Settings"
-              >
-                <Settings size={16} />
-              </button>
+            <div className="dashboard-header-actions">
+              <div className="status-badge-container">
+                <div className="status-badge">
+                  <span className="status-dot green"></span>
+                  <span>System Status: Healthy</span>
+                </div>
+                <div className="status-badge">
+                  <span className={`status-dot ${ollamaConnected ? 'green' : 'red'}`}></span>
+                  <span>Ollama: {ollamaConnected ? 'Running' : 'Offline'}</span>
+                </div>
+                <div className="status-badge">
+                  <span>{currentTime}</span>
+                </div>
+              </div>
             </div>
           </header>
 
-          <div className="messages-container">
-            {messages.length === 0 ? (
-              <div className="message system-message">
-                <div className="message-content">
-                  <div className="bot-avatar">
-                    <GoogleIcon />
-                  </div>
-                  <div className="text">
-                    <h2>Hello! I'm Gemma E4B.</h2>
-                    <p>Ask me anything or attach a PDF / image to get started.</p>
-                    <div className="suggestions">
-                      {['Compare these two ideas...', 'Write a story about a robot', 'Help me debug this React code'].map(s => (
-                        <button key={s} className="suggestion-chip" onClick={() => setInput(s)}>{s}</button>
-                      ))}
-                    </div>
-                  </div>
+          <div className="dashboard-body">
+            {/* Top row: Chat Card */}
+            <div className="dashboard-card chat-card-container">
+              <div className="dashboard-card-header">
+                <div className="dashboard-card-title">
+                  <MessageSquare size={16} />
+                  <span>Chat</span>
                 </div>
+                {(conversations.length > 0 || messages.length > 0) && (
+                  <button className="metrics-clear-btn" onClick={clearAllConversations}>
+                    <Trash2 size={13} />
+                    <span>Clear Chat</span>
+                  </button>
+                )}
               </div>
-            ) : (
-              messages.map((m, i) => (
-                <div key={i} className={`message ${m.role}-message`}>
-                  <div className="message-content">
-                    <div className={m.role === 'user' ? 'user-avatar' : 'bot-avatar'}>
-                      {m.role === 'user' ? (
-                        currentUser?.photoURL ? (
-                          <img src={currentUser.photoURL} alt="User avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
-                        ) : (
-                          <User size={18} />
-                        )
-                      ) : (
+              
+              {/* Messages container */}
+              <div className="messages-container">
+                {messages.length === 0 ? (
+                  <div className="message system-message">
+                    <div className="message-content">
+                      <div className="bot-avatar">
                         <GoogleIcon />
-                      )}
-                    </div>
-                    <div className="text">
-                      {m.image && (
-                        <img
-                          src={m.image}
-                          alt={m.fileName || 'uploaded image'}
-                          style={{
-                            maxWidth: '100%',
-                            height: 'auto',
-                            borderRadius: '8px',
-                            margin: '1rem 0',
-                            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                            display: 'block',
-                          }}
-                        />
-                      )}
-                      <ReactMarkdown components={{
-                        img: ({ src, alt }) => (
-                          <img
-                            src={src}
-                            alt={alt}
-                            style={{
-                              maxWidth: '240px',
-                              maxHeight: '160px',
-                              objectFit: 'cover',
-                              borderRadius: '8px',
-                              margin: '0.5rem 0',
-                              boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-                              display: 'block',
-                            }}
-                          />
-                        ),
-                      }}>{m.content}</ReactMarkdown>
-                      {m.role === 'bot' && m.metrics && (
-                        <div className="message-metrics">
-                          <div className="metrics-header-row">
-                            <div className="metrics-title-group">
-                              <span className="metrics-bolt-icon">⚡</span>
-                              <span className="metrics-title">METRICS ({(m.metrics?.modelLabel || 'Gemma').toUpperCase()})</span>
-                            </div>
-                            <div className="metrics-latency-pill">
-                              <span className="metrics-clock-icon">⏱️</span>
-                              <span className="metrics-latency-text">
-                                {(m.metrics?.latencyMs ?? 0) >= 1000 
-                                  ? `${((m.metrics?.latencyMs ?? 0) / 1000).toFixed(2)}s` 
-                                  : `${m.metrics?.latencyMs ?? 0}ms`}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="metrics-row-grid">
-                            <div className="metric-subcard">
-                              <span className="metric-subcard-label">INPUT TEXT</span>
-                              <span className="metric-subcard-val">{m.metrics?.inputTextTokens ?? 0} Tokens</span>
-                            </div>
-                            <div className="metric-subcard">
-                              <span className="metric-subcard-label">INPUT ATTACHMENTS</span>
-                              <span className="metric-subcard-val">{m.metrics?.inputAttachmentTokens ?? 0} Tokens</span>
-                            </div>
-                            <div className="metric-subcard">
-                              <span className="metric-subcard-label">OUTPUT TOKENS</span>
-                              <span className="metric-subcard-val">{m.metrics?.outputTokens ?? 0} Tokens</span>
-                            </div>
-                            <div className="metric-subcard">
-                              <span className="metric-subcard-label">INPUT COST</span>
-                              <span className="metric-subcard-val">${(m.metrics?.inputCostUsd ?? 0).toFixed(6)}</span>
-                            </div>
-                            <div className="metric-subcard">
-                              <span className="metric-subcard-label">OUTPUT COST</span>
-                              <span className="metric-subcard-val">${(m.metrics?.outputCostUsd ?? 0).toFixed(6)}</span>
-                            </div>
-                            <div className="metric-subcard total-cost-card">
-                              <span className="metric-subcard-label">TOTAL COST</span>
-                              <span className="metric-subcard-val">${(m.metrics?.totalCostUsd ?? 0).toFixed(6)}</span>
-                              <span className="metric-subcard-subval">₹{(m.metrics?.totalCostInr ?? 0).toFixed(4)}</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-            {isLoading && (
-              <div className="message bot-message">
-                <div className="message-content">
-                  <div className="bot-avatar">
-                    <GoogleIcon />
-                  </div>
-                  <div className="typing">
-                    <span></span><span></span><span></span>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* ========== Input Area ========== */}
-          <footer className="input-area">
-            <form onSubmit={handleSend} className="chat-input-container">
-              {fileError && (
-                <div className="file-error">
-                  <span>{fileError}</span>
-                  <button type="button" onClick={() => setFileError('')}><X size={14} /></button>
-                </div>
-              )}
-
-              {selectedFile && (
-                <div className="file-preview">
-                  {isImageFile(selectedFile) ? <Image size={16} /> : <FileText size={16} />}
-                  <span className="file-name">{selectedFile.name}</span>
-                  <span className="file-size">({(selectedFile.size / 1024).toFixed(0)} KB)</span>
-                  {uploadProgress !== null ? (
-                    <div className="upload-progress">
-                      <div className="upload-progress-track">
-                        <div className="upload-progress-bar" style={{ width: `${uploadProgress}%` }} />
                       </div>
-                      <span className="upload-progress-label">{uploadProgress}%</span>
+                      <div className="text">
+                        <h2>Hello! I'm Gemma E4B.</h2>
+                        <p>Ask me anything or attach a PDF / image to get started.</p>
+                        <div className="suggestions">
+                          {['Compare these two ideas...', 'Write a story about a robot', 'Help me debug this React code'].map(s => (
+                            <button key={s} className="suggestion-chip" onClick={() => setInput(s)}>{s}</button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
-                  ) : (
-                    <button type="button" className="file-remove" onClick={removeFile}><X size={14} /></button>
-                  )}
-                </div>
-              )}
-
-              <div className="input-wrapper">
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={handleInput}
-                  placeholder={`Message TokenLens...`}
-                  rows="1"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSend(e);
-                    }
-                  }}
-                />
-                <div className="input-actions">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="application/pdf,.pdf"
-                    onChange={handleFileSelect}
-                    style={{ display: 'none' }}
-                  />
-                  <select
-                    value={selectedModel}
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    className="model-select"
-                  >
-                    <option value="gemma">Gemma</option>
-                    <option value="gpt4">GPT-4o Mini</option>
-                  </select>
-                  <button
-                    type="button"
-                    className={`tool-btn ${selectedFile ? 'tool-btn-active' : ''}`}
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isLoading}
-                    title="Attach a PDF (max 10 MB)"
-                  >
-                    <Paperclip size={18} />
-                  </button>
-                  <button type="submit" className="send-btn" disabled={!input.trim() || isLoading}>
-                    <Send size={16} />
-                  </button>
-                </div>
+                  </div>
+                ) : (
+                  messages.map((m, i) => (
+                    <div key={i} className={`message ${m.role}-message`}>
+                      <div className="message-content">
+                        <div className={m.role === 'user' ? 'user-avatar' : 'bot-avatar'}>
+                          {m.role === 'user' ? (
+                            currentUser?.photoURL ? (
+                              <img src={currentUser.photoURL} alt="User avatar" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                            ) : (
+                              <User size={18} />
+                            )
+                          ) : (
+                            <GoogleIcon />
+                          )}
+                        </div>
+                        <div className="text">
+                          {m.image && (
+                            <img
+                              src={m.image}
+                              alt={m.fileName || 'uploaded image'}
+                              style={{
+                                maxWidth: '100%',
+                                height: 'auto',
+                                borderRadius: '8px',
+                                margin: '1rem 0',
+                                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                                display: 'block',
+                              }}
+                            />
+                          )}
+                          <ReactMarkdown components={{
+                            img: ({ src, alt }) => (
+                              <img
+                                src={src}
+                                alt={alt}
+                                style={{
+                                  maxWidth: '240px',
+                                  maxHeight: '160px',
+                                  objectFit: 'cover',
+                                  borderRadius: '8px',
+                                  margin: '0.5rem 0',
+                                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                                  display: 'block',
+                                }}
+                              />
+                            ),
+                          }}>{m.content}</ReactMarkdown>
+                          {m.role === 'bot' && m.metrics && (
+                            <div className="message-metrics">
+                              <div className="metrics-header-row">
+                                <div className="metrics-title-group">
+                                  <span className="metrics-bolt-icon">⚡</span>
+                                  <span className="metrics-title">METRICS ({(m.metrics?.modelLabel || 'Gemma').toUpperCase()})</span>
+                                </div>
+                                <div className="metrics-latency-pill">
+                                  <span className="metrics-clock-icon">⏱️</span>
+                                  <span className="metrics-latency-text">
+                                    {(m.metrics?.latencyMs ?? 0) >= 1000 
+                                      ? `${((m.metrics?.latencyMs ?? 0) / 1000).toFixed(2)}s` 
+                                      : `${m.metrics?.latencyMs ?? 0}ms`}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="metrics-row-grid">
+                                <div className="metric-subcard">
+                                  <span className="metric-subcard-label">INPUT TEXT</span>
+                                  <span className="metric-subcard-val">{m.metrics?.inputTextTokens ?? 0} Tokens</span>
+                                </div>
+                                <div className="metric-subcard">
+                                  <span className="metric-subcard-label">INPUT ATTACHMENTS</span>
+                                  <span className="metric-subcard-val">{m.metrics?.inputAttachmentTokens ?? 0} Tokens</span>
+                                </div>
+                                <div className="metric-subcard">
+                                  <span className="metric-subcard-label">OUTPUT TOKENS</span>
+                                  <span className="metric-subcard-val">{m.metrics?.outputTokens ?? 0} Tokens</span>
+                                </div>
+                                <div className="metric-subcard">
+                                  <span className="metric-subcard-label">INPUT COST</span>
+                                  <span className="metric-subcard-val">${(m.metrics?.inputCostUsd ?? 0).toFixed(6)}</span>
+                                </div>
+                                <div className="metric-subcard">
+                                  <span className="metric-subcard-label">OUTPUT COST</span>
+                                  <span className="metric-subcard-val">${(m.metrics?.outputCostUsd ?? 0).toFixed(6)}</span>
+                                </div>
+                                <div className="metric-subcard total-cost-card">
+                                  <span className="metric-subcard-label">TOTAL COST</span>
+                                  <span className="metric-subcard-val">${(m.metrics?.totalCostUsd ?? 0).toFixed(6)}</span>
+                                  <span className="metric-subcard-subval">₹{(m.metrics?.totalCostInr ?? 0).toFixed(4)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+                {isLoading && (
+                  <div className="message bot-message">
+                    <div className="message-content">
+                      <div className="bot-avatar">
+                        <GoogleIcon />
+                      </div>
+                      <div className="typing">
+                        <span></span><span></span><span></span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
               </div>
-              <p className="disclaimer">{selectedModel === 'gpt4' ? 'GPT-4o Mini' : 'Gemma E4B'} can make mistakes. Check important info.</p>
-            </form>
-          </footer>
+
+              {/* Input Area inside Chat Card */}
+              <footer className="input-area">
+                <form onSubmit={handleSend} className="chat-input-container">
+                  {fileError && (
+                    <div className="file-error">
+                      <span>{fileError}</span>
+                      <button type="button" onClick={() => setFileError('')}><X size={14} /></button>
+                    </div>
+                  )}
+
+                  {selectedFile && (
+                    <div className="file-preview">
+                      {isImageFile(selectedFile) ? <Image size={16} /> : <FileText size={16} />}
+                      <span className="file-name">{selectedFile.name}</span>
+                      <span className="file-size">({(selectedFile.size / 1024).toFixed(0)} KB)</span>
+                      {uploadProgress !== null ? (
+                        <div className="upload-progress">
+                          <div className="upload-progress-track">
+                            <div className="upload-progress-bar" style={{ width: `${uploadProgress}%` }} />
+                          </div>
+                          <span className="upload-progress-label">{uploadProgress}%</span>
+                        </div>
+                      ) : (
+                        <button type="button" className="file-remove" onClick={removeFile}><X size={14} /></button>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="input-wrapper">
+                    <textarea
+                      ref={textareaRef}
+                      value={input}
+                      onChange={handleInput}
+                      placeholder={`Message TokenLens...`}
+                      rows="1"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSend(e);
+                        }
+                      }}
+                    />
+                    <div className="input-actions">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        onChange={handleFileSelect}
+                        style={{ display: 'none' }}
+                      />
+                      <button
+                        type="button"
+                        className={`tool-btn ${selectedFile ? 'tool-btn-active' : ''}`}
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isLoading}
+                        title="Attach a PDF (max 10 MB)"
+                      >
+                        <Paperclip size={18} />
+                      </button>
+                      <button type="submit" className="send-btn" disabled={!input.trim() || isLoading}>
+                        <Send size={16} />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="disclaimer">{selectedModel === 'gpt4' ? 'GPT-4o Mini' : 'Gemma E4B'} can make mistakes. Check important info.</p>
+                </form>
+              </footer>
+            </div>
+
+            {/* Bottom Row: TokenLens Metrics Dashboard Card */}
+            <div className="dashboard-card analytics-card-container">
+              <div className="dashboard-card-header">
+                <div className="dashboard-card-title">
+                  <Layers size={16} />
+                  <span>TokenLens Analytics</span>
+                </div>
+                <span className="dashboard-card-subtitle">Live token usage and performance metrics</span>
+              </div>
+              
+              <div style={{ padding: '1.25rem' }}>
+                <DashboardMetrics metrics={metricsData} />
+              </div>
+            </div>
+          </div>
         </main>
       )}
     </div>
