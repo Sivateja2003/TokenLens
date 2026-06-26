@@ -4,6 +4,7 @@ import json
 import hmac
 import hashlib
 import time
+from typing import Optional
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
@@ -45,7 +46,7 @@ def create_jwt(payload: dict, secret: str = JWT_SECRET) -> str:
     
     return f"{unsigned_token}.{base64url_encode(signature)}"
 
-def verify_jwt(token: str, secret: str = JWT_SECRET) -> dict:
+def verify_jwt(token: str, secret: str = JWT_SECRET) -> Optional[dict]:
     """Verify the signature and expiration of our local JWT."""
     try:
         parts = token.split('.')
