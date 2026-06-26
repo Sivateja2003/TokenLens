@@ -1,172 +1,286 @@
 import React, { useState } from 'react';
-import {
-  signInWithPopup,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  updateProfile,
-} from 'firebase/auth';
-import { auth, googleProvider } from './firebase';
+import { useAuth } from './hooks/useAuth';
 import alumnxLogo from './assets/alumnxlogo_new.png';
 
-export default function AuthPage() {
-  const [mode, setMode] = useState('signin'); // 'signin' | 'signup'
+export default function AuthPage({ onBack, initialMode = 'signin' }) {
+  const { loginWithGoogle, loginWithEmail, signupWithEmail, resetPassword, error, submitting } = useAuth();
+  const [mode, setMode] = useState(initialMode); // 'signin' | 'signup' | 'forgotpassword'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
+  const [localError, setLocalError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [organization, setOrganization] = useState('');
   const [role, setRole] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
 
-  const clearError = () => setError('');
+  const clearError = () => setLocalError('');
 
   const handleGoogle = async () => {
-    setLoading(true);
     clearError();
+    setSuccessMessage('');
     try {
-      await signInWithPopup(auth, googleProvider);
+      const res = await loginWithGoogle(mode === 'signup');
+      if (res && res.isNewUser) {
+        setSuccessMessage('Registration successful! Please sign in with Google to continue.');
+        setMode('signin');
+      }
     } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
+      console.error(e);
     }
   };
 
   const handleEmailAuth = async (e) => {
     e.preventDefault();
     if (mode === 'signup' && password !== confirmPassword) {
-      setError('Passwords do not match.');
+      setLocalError('Passwords do not match.');
       return;
     }
-    setLoading(true);
     clearError();
+    setSuccessMessage('');
     try {
       if (mode === 'signup') {
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
-        if (name.trim()) {
-          await updateProfile(cred.user, { displayName: name.trim() });
+        const res = await signupWithEmail(email, password, name);
+        if (res && res.success) {
+          setSuccessMessage('Registration successful! Please sign in with your credentials.');
+          setMode('signin');
+          setPassword('');
+          setConfirmPassword('');
         }
         if (organization.trim()) localStorage.setItem('signup_organization', organization.trim());
         if (role) localStorage.setItem('signup_role', role);
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        await loginWithEmail(email, password);
       }
     } catch (e) {
-      setError(friendlyError(e.code));
-    } finally {
-      setLoading(false);
+      console.error(e);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    clearError();
+    setSuccessMessage('');
+    if (!email) {
+      setLocalError('Please enter your email address.');
+      return;
+    }
+    if (!password) {
+      setLocalError('Please enter a new password.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setLocalError('Passwords do not match.');
+      return;
+    }
+    try {
+      await resetPassword(email, password);
+      setSuccessMessage('Password reset successfully! You can now sign in.');
+      setPassword('');
+      setConfirmPassword('');
+    } catch (e) {
+      console.error(e);
     }
   };
 
   return (
     <div className="auth-page">
       <div className="auth-card">
+        {onBack && (
+          <button 
+            type="button" 
+            onClick={onBack}
+            className="auth-link" 
+            style={{ 
+              marginBottom: "0.5rem", 
+              alignSelf: "flex-start", 
+              display: "flex", 
+              alignItems: "center", 
+              gap: "4px",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "0.85rem",
+              color: "var(--text-dim)",
+              padding: "0"
+            }}
+          >
+            &larr; Back to home
+          </button>
+        )}
         <div className="auth-logo">
           <img src={alumnxLogo} alt="AlumnxLabs" className="logo-img" />
         </div>
         <h1 className="auth-title">TOKENLENS</h1>
         <p className="auth-subtitle">
-          {mode === 'signin' ? 'Sign in to continue' : 'Create your account'}
+          {mode === 'signin' 
+            ? 'Sign in to continue' 
+            : mode === 'signup' 
+              ? 'Create your account' 
+              : 'Reset your password'}
         </p>
 
-        {error && <div className="auth-error">{error}</div>}
+        {(error || localError) && <div className="auth-error">{error || localError}</div>}
+        {successMessage && <div className="auth-success" style={{ width: '100%', backgroundColor: 'rgba(52, 211, 153, 0.1)', color: '#10B981', border: '1px solid rgba(52, 211, 153, 0.2)', borderRadius: '8px', padding: '0.625rem 0.875rem', fontSize: '0.85rem', textAlign: 'center', marginBottom: '1rem' }}>{successMessage}</div>}
 
-        <button className="google-btn" onClick={handleGoogle} disabled={loading}>
-          <GoogleIcon />
-          Continue with Google
-        </button>
-
-        <div className="auth-divider"><span>or</span></div>
-
-        <form onSubmit={handleEmailAuth} className="auth-form">
-          {mode === 'signup' && (
-            <input
-              type="text"
-              placeholder="Full name"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              required
-              className="auth-input"
-              autoComplete="name"
-            />
-          )}
-          {mode === 'signup' && (
-            <input
-              type="text"
-              placeholder="Organization / Company (optional)"
-              value={organization}
-              onChange={e => setOrganization(e.target.value)}
-              className="auth-input"
-              autoComplete="organization"
-            />
-          )}
-          {mode === 'signup' && (
-            <select
-              value={role}
-              onChange={e => setRole(e.target.value)}
-              className="auth-input"
+        {mode === 'forgotpassword' ? (
+          <>
+            <form onSubmit={handleResetPassword} className="auth-form" style={{ width: '100%' }}>
+              <input
+                type="email"
+                placeholder="Email address"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                className="auth-input"
+                autoComplete="email"
+              />
+              <input
+                type="password"
+                placeholder="New password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required
+                minLength={6}
+                className="auth-input"
+                autoComplete="new-password"
+              />
+              <input
+                type="password"
+                placeholder="Confirm new password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                required
+                minLength={6}
+                className="auth-input"
+                autoComplete="new-password"
+              />
+              <button type="submit" className="auth-submit-btn" disabled={submitting} style={{ marginTop: '0.5rem' }}>
+                {submitting ? 'Please wait...' : 'Reset Password'}
+              </button>
+            </form>
+            <button
+              type="button"
+              className="auth-link"
+              onClick={() => { setMode('signin'); clearError(); setSuccessMessage(''); setPassword(''); setConfirmPassword(''); }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.85rem', color: 'var(--text-dim)', padding: '0', display: 'block', margin: '1.25rem auto 0' }}
             >
-              <option value="">Select your role (optional)</option>
-              <option value="developer">Developer / Engineer</option>
-              <option value="data_scientist">Data Scientist</option>
-              <option value="ml_engineer">ML Engineer</option>
-              <option value="product_manager">Product Manager</option>
-              <option value="devops">DevOps / SRE</option>
-              <option value="other">Other</option>
-            </select>
-          )}
-          <input
-            type="email"
-            placeholder="Email address"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            required
-            className="auth-input"
-            autoComplete="email"
-          />
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            required
-            minLength={6}
-            className="auth-input"
-            autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-          />
-          {mode === 'signup' && (
-            <input
-              type="password"
-              placeholder="Confirm password"
-              value={confirmPassword}
-              onChange={e => setConfirmPassword(e.target.value)}
-              required
-              minLength={6}
-              className="auth-input"
-              autoComplete="new-password"
-            />
-          )}
-          <button type="submit" className="auth-submit-btn" disabled={loading}>
-            {loading ? 'Please wait...' : mode === 'signin' ? 'Sign In' : 'Create Account'}
-          </button>
-        </form>
+              &larr; Back to Sign In
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="google-btn" onClick={handleGoogle} disabled={submitting}>
+              <GoogleIcon />
+              Continue with Google
+            </button>
 
-        <p className="auth-switch">
-          {mode === 'signin' ? (
-            <>Don't have an account?{' '}
-              <button className="auth-link" onClick={() => { setMode('signup'); clearError(); setConfirmPassword(''); setOrganization(''); setRole(''); }}>
-                Sign up
+            <div className="auth-divider"><span>or</span></div>
+
+            <form onSubmit={handleEmailAuth} className="auth-form">
+              {mode === 'signup' && (
+                <input
+                  type="text"
+                  placeholder="Full name"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  required
+                  className="auth-input"
+                  autoComplete="name"
+                />
+              )}
+              {mode === 'signup' && (
+                <input
+                  type="text"
+                  placeholder="Organization / Company (optional)"
+                  value={organization}
+                  onChange={e => setOrganization(e.target.value)}
+                  className="auth-input"
+                  autoComplete="organization"
+                />
+              )}
+              {mode === 'signup' && (
+                <select
+                  value={role}
+                  onChange={e => setRole(e.target.value)}
+                  className="auth-input"
+                >
+                  <option value="">Select your role (optional)</option>
+                  <option value="developer">Developer / Engineer</option>
+                  <option value="data_scientist">Data Scientist</option>
+                  <option value="ml_engineer">ML Engineer</option>
+                  <option value="product_manager">Product Manager</option>
+                  <option value="devops">DevOps / SRE</option>
+                  <option value="other">Other</option>
+                </select>
+              )}
+              <input
+                type="email"
+                placeholder="Email address"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                className="auth-input"
+                autoComplete="email"
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required
+                minLength={6}
+                className="auth-input"
+                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+              />
+              
+              {mode === 'signin' && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', width: '100%', marginTop: '-0.25rem', marginBottom: '0.55rem' }}>
+                  <button
+                    type="button"
+                    className="auth-link"
+                    onClick={() => { setMode('forgotpassword'); clearError(); setSuccessMessage(''); setPassword(''); setConfirmPassword(''); }}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.78rem', color: 'var(--text-dim)', padding: '0' }}
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+              )}
+
+              {mode === 'signup' && (
+                <input
+                  type="password"
+                  placeholder="Confirm password"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  required
+                  minLength={6}
+                  className="auth-input"
+                  autoComplete="new-password"
+                />
+              )}
+              <button type="submit" className="auth-submit-btn" disabled={submitting}>
+                {submitting ? 'Please wait...' : mode === 'signin' ? 'Sign In' : 'Create Account'}
               </button>
-            </>
-          ) : (
-            <>Already have an account?{' '}
-              <button className="auth-link" onClick={() => { setMode('signin'); clearError(); setConfirmPassword(''); }}>
-                Sign in
-              </button>
-            </>
-          )}
-        </p>
+            </form>
+
+            <p className="auth-switch">
+              {mode === 'signin' ? (
+                <>Don't have an account?{' '}
+                  <button className="auth-link" onClick={() => { setMode('signup'); clearError(); setConfirmPassword(''); setOrganization(''); setRole(''); }}>
+                    Sign up
+                  </button>
+                </>
+              ) : (
+                <>Already have an account?{' '}
+                  <button className="auth-link" onClick={() => { setMode('signin'); clearError(); setConfirmPassword(''); }}>
+                    Sign in
+                  </button>
+                </>
+              )}
+            </p>
+          </>
+        )}
       </div>
     </div>
   );

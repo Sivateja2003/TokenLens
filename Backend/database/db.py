@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 
-from .models import Base, UserProfile, ChatSession, QueryAnalytic, ApiUsage, ApiKey, AgentRun
+from .models import Base, User, UserProfile, ChatSession, QueryAnalytic, ApiUsage, ApiKey, AgentRun
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +200,17 @@ def log_query(
     return record
 
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# ── API key helpers ───────────────────────────────────────────────────────────
+
+
 def verify_api_key(db: Session, raw_key: str) -> str | None:
     """Hash raw key, look up in api_keys, update last_used. Returns user_id or None."""
     key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
@@ -240,6 +251,7 @@ def revoke_api_key(db: Session, user_id: str) -> None:
     if row:
         db.delete(row)
         db.commit()
+        logger.info("API key revoked for user: %s", user_id)
 
 
 def create_agent_run(

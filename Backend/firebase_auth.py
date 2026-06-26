@@ -34,6 +34,8 @@ PUBLIC_ROUTES = {
     "/docs",
     "/openapi.json",
     "/redoc",
+    "/api/auth/login",
+    "/api/auth/reset-password",
 }
 
 _firebase_app = None
@@ -105,6 +107,25 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
 
         # Extract Bearer token
         auth_header = request.headers.get("Authorization", "")
+
+        # Local JWT path — check if this is a valid local JWT token
+        if auth_header.startswith("Bearer "):
+            token_candidate = auth_header.split(" ", 1)[1].strip()
+            if token_candidate and not token_candidate.startswith("tl-"):
+                from auth import verify_jwt
+                try:
+                    local_claims = verify_jwt(token_candidate)
+                    if local_claims:
+                        request.state.user = {
+                            "uid":      str(local_claims.get("sub")),
+                            "email":    local_claims.get("email", ""),
+                            "name":     local_claims.get("name", ""),
+                            "role":     local_claims.get("role", "developer"),
+                            "firebase": {},
+                        }
+                        return await call_next(request)
+                except Exception as e:
+                    logger.warning("Local JWT verification check failed (will try Firebase): %s", e)
 
         # API key path — tl- prefixed keys bypass Firebase verification
         if auth_header.startswith("Bearer tl-"):

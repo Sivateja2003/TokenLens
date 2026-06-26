@@ -36,6 +36,8 @@ import PyPDF2
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+from datetime import datetime
 from firebase_auth import FirebaseAuthMiddleware, init_firebase
 from memory import (
     add_turn_and_get_prompt,
@@ -46,7 +48,11 @@ from memory import (
     summarize_in_background,
 )
 from memory.store import delete as delete_session
-from database import init_db, upsert_user, upsert_session, log_query, save_pdf_chunks, load_pdf_chunks, SessionLocal, create_agent_run, set_agent_run_progress
+from database import (
+    init_db, upsert_user, upsert_session, log_query, save_pdf_chunks, load_pdf_chunks,
+    SessionLocal, get_db, User, create_agent_run, set_agent_run_progress
+)
+from auth import LoginPayload, ResetPasswordPayload, get_current_user, create_jwt, decode_jwt_payload_unverified
 
 
 # ── env ───────────────────────────────────────────────────────────────────────
@@ -198,7 +204,7 @@ app.add_middleware(
 # ── request / response models ─────────────────────────────────────────────────
 class ChatRequest(BaseModel):
     session_id: str = Field(..., min_length=1, description="Unique conversation ID")
-    user_id:    str = Field(default="anonymous", description="Persistent anonymous user ID from localStorage")
+    user_id:    str | None = Field(default="anonymous", description="Persistent anonymous user ID from localStorage")
     message:    str = Field(..., min_length=1, description="User message text")
     model:      str = Field(default="gemma", description="Tokenizer model: 'gemma' (SentencePiece) or 'gpt4' (BPE)")
 
@@ -869,22 +875,110 @@ def count_tokens(text: str, model_type: str = "gemma"):
 def root():
     return {"service": "Gemma4 Chat Service", "version": "3.0.0", "docs": "/docs"}
 
-@app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+@app.post("/api/auth/login")
+def login_with_firebase(payload: LoginPayload, db: Session = Depends(get_db)):
+    """
+    Receives a Firebase ID Token (or bypass mock token).
+    Looks up the user by email. Creates user if not exists.
+    Returns local JWT.
+    """
+    token = payload.id_token
     
-    upload_folder = "uploads"
-    os.makedirs(upload_folder, exist_ok=True)
-
-    file_path = os.path.join(upload_folder, file.filename)
-
-    with open(file_path, "wb") as buffer:
-        buffer.write(await file.read())
-
-    return {
-        "message": "File uploaded successfully",
-        "filename": file.filename,
-        "path": file_path
+    try:
+        claims = decode_jwt_payload_unverified(token)
+        email = claims.get("email")
+        name = claims.get("name") or email.split("@")[0].title()
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid ID Token payload: {str(e)}"
+        )
+            
+    if not email:
+        raise HTTPException(
+            status_code=400,
+            detail="ID token does not contain a valid email address."
+        )
+        
+    user = db.query(User).filter(User.email == email).first()
+    
+    if not user:
+        user = User(
+            name=name,
+            email=email,
+            role="admin"
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        
+    import time
+    jwt_payload = {
+        "sub": user.id,
+        "email": user.email,
+        "name": user.name,
+        "role": user.role,
+        "exp": int(time.time()) + 24 * 3600
     }
+    local_jwt = create_jwt(jwt_payload)
+    
+    return {
+        "token": local_jwt,
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role
+        }
+    }
+
+
+@app.post("/api/auth/reset-password")
+def reset_password(payload: ResetPasswordPayload, db: Session = Depends(get_db)):
+    """
+    Directly updates a user's password in Firebase using Admin SDK.
+    Also validates that the user exists locally.
+    """
+    email = payload.email.strip().lower() if payload.email else ""
+    new_password = payload.new_password
+
+    if not email or not new_password:
+        raise HTTPException(
+            status_code=400,
+            detail="Email and new password are required."
+        )
+
+    # 1. Update in Firebase if initialized
+    from firebase_auth import _firebase_app
+    if _firebase_app is not None:
+        try:
+            from firebase_admin import auth as admin_auth
+            fb_user = admin_auth.get_user_by_email(email)
+            admin_auth.update_user(fb_user.uid, password=new_password)
+        except admin_auth.UserNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail="No account found with this email in Firebase."
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Firebase password reset failed: {str(e)}"
+            )
+    else:
+        logger.warning("Firebase not initialised — bypassing password update for %s", email)
+
+    # 2. Check if user exists in local database
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="No account found with this email in local database."
+        )
+
+    return {"message": "Password reset successfully."}
+
+
 # ── entry point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
