@@ -214,13 +214,11 @@ function AppContent({ theme, setTheme }) {
           const signupRole = localStorage.getItem('signup_role') || null;
           localStorage.removeItem('signup_organization');
           localStorage.removeItem('signup_role');
-          // Register user in DB on every login; pass signup profile fields on first registration
           await fetch(`${API_BASE_URL}/admin/register`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ organization: signupOrg, role: signupRole }),
           });
-          // Check admin status
           const res = await fetch(`${API_BASE_URL}/admin/check`, {
             headers: { Authorization: `Bearer ${token}` },
           });
@@ -246,8 +244,6 @@ function AppContent({ theme, setTheme }) {
   const [conversations, setConversations] = useState(() => {
     const saved = localStorage.getItem('gemma_conversations');
     if (saved) return JSON.parse(saved);
-    
-    // Migrate single chat history from previous versions:
     const oldHistory = localStorage.getItem('gemma_chat_history');
     const oldSessionId = localStorage.getItem('gemma_session_id');
     if (oldHistory && oldSessionId) {
@@ -272,13 +268,22 @@ function AppContent({ theme, setTheme }) {
     return [];
   });
 
-  const [sesssionId, setSessionId] = useState(() => {
-    const saved = localStorage.getItem('gemma_session_id');
-    if (saved) return saved;
-    const newId = 'sess-' + Date.now();
-    localStorage.setItem('gemma_session_id', newId);
-    return newId;
-  });
+  // ✅ FIX: session ID starts as a temporary value; will be replaced once user logs in
+  const [sesssionId, setSessionId] = useState('sess-' + Date.now());
+
+  // ✅ FIX: once Firebase resolves the user, set a session ID scoped to that user's UID
+  useEffect(() => {
+    if (!currentUser) return;
+    const key = `gemma_session_id_${currentUser.uid}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      setSessionId(saved);
+    } else {
+      const newId = `sess-${currentUser.uid}-${Date.now()}`;
+      localStorage.setItem(key, newId);
+      setSessionId(newId);
+    }
+  }, [currentUser]);
 
   const [messages, setMessages] = useState(() => {
     const savedSessionId = localStorage.getItem('gemma_session_id');
@@ -304,7 +309,7 @@ function AppContent({ theme, setTheme }) {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
   const [fileError, setFileError] = useState('');
-  const [uploadProgress, setUploadProgress] = useState(null); // null = not uploading
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [view, setView] = useState('chat');
   const [metricsData, setMetricsData] = useState(() => {
     const saved = localStorage.getItem('gemma_metrics');
@@ -314,14 +319,18 @@ function AppContent({ theme, setTheme }) {
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Sync active messages to multi-conversation state and LocalStorage:
   useEffect(() => {
-    localStorage.setItem('gemma_session_id', sesssionId);
-  }, [sesssionId]);
+    localStorage.setItem('gemma_theme', theme);
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    localStorage.setItem(`gemma_session_id_${currentUser.uid}`, sesssionId);
+  }, [sesssionId, currentUser]);
 
   useEffect(() => {
     if (messages.length === 0) return;
-    
     setConversations(prev => {
       const existingIdx = prev.findIndex(c => c.id === sesssionId);
       let updated;
@@ -480,30 +489,27 @@ function AppContent({ theme, setTheme }) {
         }
         data = await response.json();
       }
+
       const latencyMs = Date.now() - startTime;
       const currentTextTokens = estimateTokens(trimmed);
-      const currentAttachmentTokens = selectedFile 
-        ? (selectedFile.name.toLowerCase().endsWith('.pdf') 
-            ? Math.min(1500, Math.ceil(selectedFile.size / 8)) 
-            : 250) 
+      const currentAttachmentTokens = selectedFile
+        ? (selectedFile.name.toLowerCase().endsWith('.pdf')
+            ? Math.min(1500, Math.ceil(selectedFile.size / 8))
+            : 250)
         : 0;
       const pTok = currentTextTokens + currentAttachmentTokens;
-      
       const cTok = data.usage?.completion_tokens ?? data.completion_tokens ?? data.output_tokens ?? estimateTokens(data.response);
       const pricing = MODEL_PRICING[selectedModel] ?? MODEL_PRICING.gemma;
-      
       const INR_RATE = 84.5;
       const textTokens = currentTextTokens;
       const attachmentTokens = currentAttachmentTokens;
-      
       const inputCostUsd = pTok * pricing.input;
       const inputCostInr = inputCostUsd * INR_RATE;
-      
       const outputCostUsd = cTok * pricing.output;
       const outputCostInr = outputCostUsd * INR_RATE;
-      
       const totalCostUsd = inputCostUsd + outputCostUsd;
       const totalCostInr = totalCostUsd * INR_RATE;
+
       setMetricsData(prev => [...prev, {
         id: `m-${Date.now()}`,
         timestamp: Date.now(),
@@ -515,8 +521,8 @@ function AppContent({ theme, setTheme }) {
         cost_usd: totalCostUsd,
       }]);
 
-      setMessages(prev => [...prev, { 
-        role: 'bot', 
+      setMessages(prev => [...prev, {
+        role: 'bot',
         content: data.response,
         metrics: {
           inputTextTokens: textTokens,
@@ -556,13 +562,16 @@ function AppContent({ theme, setTheme }) {
       const updated = conversations.filter(c => c.id !== id);
       setConversations(updated);
       localStorage.setItem('gemma_conversations', JSON.stringify(updated));
-      
+
       if (sesssionId === id) {
         if (updated.length > 0) {
           setSessionId(updated[0].id);
           setMessages(updated[0].messages);
         } else {
-          setSessionId('sess-' + Date.now());
+          // ✅ FIX: new session ID scoped to current user
+          const newId = `sess-${currentUser.uid}-${Date.now()}`;
+          if (currentUser) localStorage.setItem(`gemma_session_id_${currentUser.uid}`, newId);
+          setSessionId(newId);
           setMessages([]);
         }
       }
@@ -574,7 +583,10 @@ function AppContent({ theme, setTheme }) {
       setConversations([]);
       localStorage.removeItem('gemma_conversations');
       setMessages([]);
-      setSessionId('sess-' + Date.now());
+      // ✅ FIX: new session ID scoped to current user
+      const newId = `sess-${currentUser?.uid ?? 'anon'}-${Date.now()}`;
+      if (currentUser) localStorage.setItem(`gemma_session_id_${currentUser.uid}`, newId);
+      setSessionId(newId);
     }
   };
 
@@ -602,8 +614,16 @@ function AppContent({ theme, setTheme }) {
         {/* Navigation Tabs List */}
         <div className="sidebar-menu-tabs">
           <button
-            className={`sidebar-tab-btn ${view === 'chat' ? 'active' : ''}`}
-            onClick={() => setView('chat')}
+            className="new-chat-btn"
+            onClick={() => {
+              // ✅ FIX: new session ID scoped to current user
+              const newId = `sess-${currentUser.uid}-${Date.now()}`;
+              localStorage.setItem(`gemma_session_id_${currentUser.uid}`, newId);
+              setMessages([]);
+              setSelectedFile(null);
+              setSessionId(newId);
+              setView('chat');
+            }}
           >
             <MessageSquare size={16} />
             <span>Chat</span>
@@ -718,11 +738,11 @@ function AppContent({ theme, setTheme }) {
             >
               Gemma (Local)
             </button>
-            <button
-              className={`sidebar-model-pill ${selectedModel === 'gpt4' ? 'active' : ''}`}
-              onClick={() => setSelectedModel('gpt4')}
-            >
-              GPT-4o Mini
+          )}
+          {(conversations.length > 0 || messages.length > 0) && (
+            <button className="dashboard-nav-btn nav-danger" onClick={clearAllConversations}>
+              <Trash2 size={15} />
+              <span>Clear History</span>
             </button>
           </div>
         </div>
@@ -1066,7 +1086,51 @@ function AppContent({ theme, setTheme }) {
                   <Layers size={16} />
                   <span>TokenLens Analytics</span>
                 </div>
-                <span className="dashboard-card-subtitle">Live token usage and performance metrics</span>
+              )}
+
+              <div className="input-wrapper">
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={handleInput}
+                  placeholder={`Message ${selectedModel === 'gpt4' ? 'GPT-4o Mini' : 'TokenLens'}...`}
+                  rows="1"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSend(e);
+                    }
+                  }}
+                />
+                <div className="input-actions">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    onChange={handleFileSelect}
+                    style={{ display: 'none' }}
+                  />
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="model-select"
+                  >
+                    <option value="gemma">Gemma</option>
+                    <option value="gpt4">GPT-4o Mini</option>
+                  </select>
+                  <button
+                    type="button"
+                    className={`tool-btn ${selectedFile ? 'tool-btn-active' : ''}`}
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isLoading}
+                    title="Attach a PDF (max 3 MB)"
+                  >
+                    <Paperclip size={18} />
+                  </button>
+                  <button type="submit" className="send-btn" disabled={!input.trim() || isLoading}>
+                    <Send size={16} />
+                  </button>
+                </div>
               </div>
               
               <div style={{ padding: '1.25rem' }}>
